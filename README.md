@@ -124,7 +124,7 @@ Set `ASANA_TOKEN` env var. Call with the Asana task GID:
 ```
 post_evidence(
   task_gid="1234567890",
-  summary="Fixed the scope drift bug. All 37 tests pass, ruff clean.",
+  summary="Fixed the scope drift bug. All 29 tests pass, ruff clean.",
   exit_code=0,
   artifacts=["tests/test_npflight_mcp.py"],
   duration_s=42
@@ -148,7 +148,7 @@ Set `MCP_DEBUG=true` in env to include full Python tracebacks in error responses
 python -m pytest tests/ -v
 ```
 
-37 tests, 0 external dependencies.
+29 tests, 0 external dependencies.
 
 ## License
 

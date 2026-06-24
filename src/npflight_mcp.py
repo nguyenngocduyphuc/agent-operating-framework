@@ -43,7 +43,7 @@ CONFIG_FILE = os.path.join(AUDIT_DIR, "config.json")
 SESSION_ID = uuid.uuid4().hex[:8]
 DEBUG = os.environ.get("MCP_DEBUG", "").lower() == "true"
 
-_CFG: dict | None = None
+_CFG = None  # Optional[dict]
 
 
 def _cfg() -> dict:
@@ -69,7 +69,7 @@ def _gates() -> dict:
     return {**defaults, **_cfg().get("gates", {})}
 
 
-def _protocol_path() -> str | None:
+def _protocol_path():
     configured = _cfg().get("operating_protocol_path")
     if configured and os.path.exists(configured):
         return configured

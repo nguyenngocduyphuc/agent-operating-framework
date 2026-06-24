@@ -1,0 +1,22 @@
+{
+  "_comment": "Copy this to ~/.npflight/config.json and adjust to your workspace",
+
+  "workspace": "/path/to/your/workspace",
+
+  "operating_protocol_path": "/path/to/your/OPERATING_PROTOCOL.md",
+
+  "contract_fields": [
+    "Task", "Owner", "Scope", "DoD", "Do not", "Stop if", "Return"
+  ],
+
+  "env_checks": [
+    "ASANA_TOKEN",
+    "OPENAI_API_KEY"
+  ],
+
+  "gates": {
+    "ruff": ["ruff", "check", "."],
+    "pytest": ["python", "-m", "pytest", "tests/", "-x", "-q", "--tb=short"],
+    "custom": ["make", "test"]
+  }
+}

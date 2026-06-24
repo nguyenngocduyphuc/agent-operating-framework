@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "operating-framework": {
+      "command": "python3",
+      "args": ["/absolute/path/to/agent-operating-framework/src/npflight_mcp.py"],
+      "env": {
+        "ASANA_TOKEN": "${ASANA_TOKEN}",
+        "MCP_DEBUG": "false"
+      }
+    }
+  }
+}

@@ -33,7 +33,8 @@ def sh(args, cwd=None):
 def nearest_repo(start):
     d = os.path.abspath(start)
     while d != "/":
-        if os.path.isdir(os.path.join(d, ".git")):
+        git_path = os.path.join(d, ".git")
+        if os.path.isdir(git_path) or os.path.isfile(git_path):
             return d
         d = os.path.dirname(d)
     return None
@@ -180,7 +181,6 @@ def main():
         print("  CONTRACT: Task/Owner/Scope/DoD/Do-not/Stop-if/Return. Boundary -> return blocker, NEVER self-expand.")
         print("  Worker NO: publish/deploy/git/tracker-write (orchestrator-only).")
         print(f"  Protocol: {card['protocol']}")
-        print(f"  Research stack: {'OK' if rstack['present'] else 'MISSING'}")
         if policy.get("policy_loaded") or policy.get("require_task"):
             print(f"  POLICY: require_task={bool(policy.get('require_task'))} . "
                   f"require_contract={bool(policy.get('require_contract'))} . "

@@ -1,155 +1,149 @@
-# agent-operating-framework
+# Agent Operating Framework (AOF)
 
-> MCP server that wires AI agents into a structured, evidence-backed execution loop.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](core/LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Status: Beta](https://img.shields.io/badge/status-beta-orange.svg)](#)
 
-Agents are powerful but drift. They skip contract validation, forget to post evidence, and silently expand scope. This MCP makes the right behavior the easy path — one tool call per step, structured JSON responses, tamper-evident audit trail.
+> A lightweight operational gate for AI-agent workspaces -- prevents wrong-repo, wrong-branch, and ungrounded execution.
 
-## The execution loop
+## Features
 
-```
-preflight → check_contract → work → audit_scope → verify_gate → post_evidence → Done|Blocked
-```
+- **Preflight gate** -- detects workspace, repo, branch, and credential gaps before work starts. Exit 0 = ready, exit 2 = fix first.
+- **Execution contract** -- scope-lock every task with Task/Owner/Scope/DoD/Stop-if/Return. No silent expansion, no scope creep.
+- **MCP server** -- stdio JSON-RPC server for agent-host integration (Claude Code, Cline, Cursor, etc.). Exposes `preflight`, `check_contract`, `verify_gate`, `audit_scope`, `session_log`, and `post_evidence` tools.
+- **Scope audit** -- compares changed files against the active contract scope before claiming done. Catches side-quests automatically.
+- **Verify gate** -- runs quality checks (ruff, pytest, custom gates) with optional multi-trial statistical pass for flaky tests.
+- **Evidence log** -- structured audit trail to `~/.npflight/audit.jsonl`. Every action is logged: decisions, gates, blockers, outcomes.
 
-Every step is a tool call. Every call is logged. Scope violations surface before they cost hours.
-
-## Why it works
-
-A real incident from the author's workspace:
-
-> Agent received a task to fix a bug in `scripts/npflight.py`. Without scope enforcement, it "improved" adjacent code in 4 other files, broke two tests, and spent 40 minutes on work that wasn't asked for.
-
-With `check_contract` + `audit_scope`, the scope would have been locked to one file before work began. `audit_scope` would have flagged the 4 extra files immediately.
-
-## Tools (8)
-
-| Tool | When to call | Returns |
-|------|-------------|---------|
-| `preflight(cwd, task)` | First, every session | `{status, checks[], blockers[]}` |
-| `check_contract(brief)` | Before dispatching work | `{ok, missing[], decision_id}` |
-| `operating_protocol()` | When you need the rules | Protocol text |
-| `post_evidence(task_gid, summary, exit_code, artifacts, duration_s)` | When Done or Blocked | `{ok, story_gid}` |
-| `verify_gate(gate_type, cwd, extra_args)` | Before marking Done | `{status, exit_code, output}` |
-| `audit_scope(scope, changed_files)` | After editing files | `{ok, out_of_scope[]}` |
-| `session_log(event, data)` | Key decision points | `{ok, logged}` |
-| `query_audit(limit, tool, session_id)` | Debugging / analysis | `{entries[], summary}` |
-
-## Install
+## Quickstart
 
 ```bash
-git clone https://github.com/nguyenngocduyphuc/agent-operating-framework
-cd agent-operating-framework
-bash install.sh
+# 1. Clone or copy core/ into your project
+# 2. Create a workspace marker
+touch .agentframework
+# 3. Run preflight
+python -m core.preflight
+# 4. Integrate MCP server with your agent host
+python -m core.mcp_server
 ```
 
-To auto-register in an existing `.mcp.json`:
-```bash
-bash install.sh --mcp-json /path/to/.mcp.json
-```
-
-## Configuration
-
-All optional. Works with zero config out of the box.
-
-`~/.npflight/config.json`:
-
-```json
-{
-  "workspace": "/path/to/your/project",
-  "operating_protocol_path": "/path/to/OPERATING_PROTOCOL.md",
-  "contract_fields": ["Task", "Owner", "Scope", "DoD", "Do not", "Stop if", "Return"],
-  "env_checks": ["ASANA_TOKEN", "OPENAI_API_KEY"],
-  "gates": {
-    "ruff": ["ruff", "check", "."],
-    "pytest": ["python", "-m", "pytest", "tests/", "-x", "-q"],
-    "custom": ["make", "test"]
-  }
-}
-```
-
-See `examples/config.json` for the full reference.
-
-## Manual MCP registration
-
-Add to your `.mcp.json`:
+Configure your agent host's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "operating-framework": {
-      "command": "python3",
-      "args": ["/path/to/agent-operating-framework/src/npflight_mcp.py"],
+    "aof": {
+      "command": "python",
+      "args": ["-m", "core.mcp_server"],
       "env": {}
     }
   }
 }
 ```
 
-## Preflight checks (R1–R4+)
+---
 
-`preflight` runs these checks and returns machine-parseable JSON:
-
-| Check | What it detects |
-|-------|----------------|
-| R1 git_repo | Agent is inside a git repository |
-| R2 feature_branch | Not on `main` or `master` |
-| R3 task_in_branch | Task id appears in branch name |
-| R4 clean_shared_branch | No uncommitted changes on shared branches |
-| R5+ configurable | Any env var in `config.env_checks` |
-
-`status` is `clear`, `warn`, or `blocked`. Agents can act on individual check IDs.
-
-## Audit trail
-
-Every tool call is logged to `~/.npflight/audit.jsonl`:
-
-```json
-{
-  "ts": "2026-06-24T10:30:45Z",
-  "session_id": "a3f2c1b0",
-  "tool": "check_contract",
-  "args": {"brief_len": "412"},
-  "result": "CONTRACT OK — all scope-lock fields present.",
-  "duration_ms": 3
-}
-```
-
-`session_id` correlates all calls in a session. Use `query_audit` to analyze patterns.
-
-`check_contract` also writes to `~/.npflight/decisions.jsonl` — a tamper-evident record written **before** the tool returns, so the decision exists even if execution fails.
-
-## `post_evidence` (Asana integration)
-
-Set `ASANA_TOKEN` env var. Call with the Asana task GID:
+## Architecture
 
 ```
-post_evidence(
-  task_gid="1234567890",
-  summary="Fixed the scope drift bug. All 29 tests pass, ruff clean.",
-  exit_code=0,
-  artifacts=["tests/test_npflight_mcp.py"],
-  duration_s=42
-)
+adapters/              workspace-specific config (env, policy, credentials)
+  .env.example
+  workspace_config.example.json
+
+  core/                  generic framework (preflight, MCP, contracts, protocol)
+  preflight.py
+  check_contract.py
+  mcp_server.py
+  execution_contract.md
+  operating_protocol.md
+
+examples/              runnable demo and templates
+  demo.py
+  quickstart.md
+  contract_template.md
 ```
 
-Posts a formatted comment to the Asana task. No external dependencies — uses Python `urllib`.
+Core is workspace-agnostic. Adapters bridge it to a specific project by supplying environment variables, paths, and policy flags. Activation order: core defaults -> adapter files -> env vars.
 
-## Debug mode
+---
 
-Set `MCP_DEBUG=true` in env to include full Python tracebacks in error responses.
+## Why AOF?
 
-## Requirements
+AI agents drift. The same problems show up session after session: an agent commits to the wrong repository, works on the wrong branch, silently expands scope beyond what was asked, or makes ungrounded claims that slip past human review. These are not bad-agent problems -- they are no-gate problems.
 
-- Python 3.9+ (stdlib only — no `pip install` needed)
-- Claude Code, Cursor, or any MCP-compatible client
+AOF puts a lightweight gate at the session boundary. It runs at the start of every agent session and catches the same class of errors that a pre-flight checklist catches for a pilot: "Am I in the right place? Do I have what I need? What am I not allowed to do?" The gate is opt-in per workspace, takes under a second to run, and fails closed.
 
-## Tests
+AOF is not a platform. There are no servers to operate, no databases to maintain, no dashboards to check. It is a thin CLI tool with a companion MCP server, written in Python stdlib only. You can copy `core/` into any project and be running in five minutes. The contract is a markdown header, the evidence log is a JSONL file, and the policy is a flat JSON dict.
+
+The philosophy is contract-first, gate-on-path, evidence-before-done. Every task starts with a written contract that defines scope and stopping conditions. Every gate is checked along the execution path, not at the end. No task is closed without structured evidence. This is operational discipline, not middleware.
+
+---
+
+## Installation
 
 ```bash
-python -m pytest tests/ -v
+# Copy into your project (lightweight, no deps)
+cp -r core/ your-project/
 ```
 
-29 tests, 0 external dependencies.
+> **Note**: AOF is designed to be copied directly into projects rather than installed as a package. This avoids dependency management complexity and ensures full control over the framework.
+
+---
+
+## Usage
+
+```bash
+# Run preflight (check workspace, repo, branch, credentials)
+python -m core.preflight
+
+# Machine-readable output (for tooling)
+python -m core.preflight --json
+
+# Start MCP server (stdio JSON-RPC)
+python -m core.mcp_server
+
+# Run quality checks via MCP server
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"verify_gate","arguments":{"gate_type":"ruff"}}}' | python -m core.mcp_server
+```
+
+All commands exit 0 on success, 1 on soft failure, 2 on blocker.
+
+---
+
+## Configuration
+
+| File | Purpose |
+|------|---------|
+| `.agentframework` | Workspace marker file. AOF scans parent directories for this file to find the workspace root. |
+| `.aof_policy.json` | Workspace policy. Controls enforcement flags (`require_contract`, `require_evidence`, `enforcement_mode`, etc.). |
+| `adapters/.env` | Credentials and path overrides. Not committed. Template at `adapters/.env.example`. |
+| `adapters/workspace_config.json` | Gate commands, credential groups, and workspace-specific paths. Not committed. Template at `adapters/workspace_config.example.json`. |
+
+---
+
+## Adapters
+
+The `adapters/` directory holds workspace-specific configuration. The directory ships empty (with templates) until you customize it for your project. This keeps the core framework pure and reusable across any codebase.
+
+Common adapter customizations:
+- Setting `require_asana_task: true` to block taskless implementation
+- Defining custom gate commands under `gates` (e.g., `"typecheck": "mypy src/"`)
+- Configuring credential groups for workspace-specific API tokens
+
+---
+
+## Contributing
+
+Contributions are welcome. This project is in active development. Open an issue or pull request on the repository.
 
 ## License
 
-MIT
+MIT License. See [core/LICENSE](core/LICENSE).
+
+---
+
+## Links
+
+- [Execution Contract](core/execution_contract.md)
+- [Operating Protocol](core/operating_protocol.md)
+- [Quickstart Guide](examples/quickstart.md)

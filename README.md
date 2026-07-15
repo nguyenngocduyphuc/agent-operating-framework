@@ -50,7 +50,7 @@ adapters/              workspace-specific config (env, policy, credentials)
   .env.example
   workspace_config.example.json
 
-  core/                  generic framework (preflight, MCP, contracts, protocol)
+core/                  generic framework (preflight, MCP, contracts, protocol)
   preflight.py
   check_contract.py
   mcp_server.py
@@ -87,6 +87,10 @@ cp -r core/ your-project/
 ```
 
 > **Note**: AOF is designed to be copied directly into projects rather than installed as a package. This avoids dependency management complexity and ensures full control over the framework.
+
+Keep host runtime state such as `.claude/`, `.codex/`, session logs, and credentials
+out of the distribution repository. Configure Claude Code or Codex to call the
+tracked `core.mcp_server` entry point; do not publish a user's local agent folder.
 
 ---
 

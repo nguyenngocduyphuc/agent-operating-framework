@@ -7,7 +7,6 @@ from pathlib import Path
 
 from core import preflight
 
-
 REPO = Path(__file__).resolve().parents[1]
 
 

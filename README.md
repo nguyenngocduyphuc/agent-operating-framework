@@ -15,6 +15,44 @@
 - **Verify gate** -- runs quality checks (ruff, pytest, custom gates) with optional multi-trial statistical pass for flaky tests.
 - **Evidence log** -- structured audit trail to `~/.npflight/audit.jsonl`. Every action is logged: decisions, gates, blockers, outcomes.
 
+## No-code quickstart
+
+Paste one of these prompts into Claude Code or Codex (pilot hosts). No Python, JSON, or git knowledge needed.
+
+### Install
+
+```text
+Install Agent Operating Framework from
+https://github.com/nguyenngocduyphuc/agent-operating-framework
+for this workspace. Keep credentials private, configure the AOF MCP server,
+run the smoke test, and tell me only: Ready, Needs approval, or Blocked.
+```
+
+### Daily use
+
+```text
+Use AOF for this goal: <plain-language goal>.
+Plan it, keep scope safe, ask before risky actions, verify the result,
+and give me a plain-language evidence summary.
+```
+
+### What to expect
+
+Your agent responds with one of four states:
+
+| State | Meaning |
+|-------|---------|
+| **Planning** | Analysing the goal, creating a contract, checking prerequisites. |
+| **Needs approval** | Ready to act but needs your OK — scope, risk, or cost check. |
+| **Blocked** | Can't proceed — wrong workspace, missing credentials, or unsafe request. |
+| **Done** | Goal met. Summary is plain language, not JSON or exit codes. |
+
+Technical details (exit codes, JSON, MCP calls) stay hidden by default.
+
+> **Pilot hosts:** Claude Code and Codex first. Other hosts (Cursor, Gemini, etc.) added after the pilot.
+
+---
+
 ## Quickstart
 
 ```bash

@@ -46,9 +46,8 @@ Configure your agent host's `.mcp.json`:
 ## Architecture
 
 ```
-adapters/              workspace-specific config (env, policy, credentials)
+adapters/              workspace-specific config (env, credentials)
   .env.example
-  workspace_config.example.json
 
 core/                  generic framework (preflight, MCP, contracts, protocol)
   preflight.py
@@ -58,7 +57,7 @@ core/                  generic framework (preflight, MCP, contracts, protocol)
   operating_protocol.md
 
 examples/              runnable demo and templates
-  demo.py
+  full_flow_demo.py
   quickstart.md
   contract_template.md
 ```
@@ -110,7 +109,7 @@ python -m core.mcp_server
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"verify_gate","arguments":{"gate_type":"ruff"}}}' | python -m core.mcp_server
 ```
 
-All commands exit 0 on success, 1 on soft failure, 2 on blocker.
+All commands exit 0 on success, 2 on blocker.
 
 ---
 
@@ -119,20 +118,16 @@ All commands exit 0 on success, 1 on soft failure, 2 on blocker.
 | File | Purpose |
 |------|---------|
 | `.agentframework` | Workspace marker file. AOF scans parent directories for this file to find the workspace root. |
-| `.aof_policy.json` | Workspace policy. Controls enforcement flags (`require_contract`, `require_evidence`, `enforcement_mode`, etc.). |
+| `.aof_policy.json` | Workspace policy. Controls enforcement flags (`require_task`, `require_contract`, `require_evidence`, etc.). Start from `.aof_policy.example.json`. |
 | `adapters/.env` | Credentials and path overrides. Not committed. Template at `adapters/.env.example`. |
-| `adapters/workspace_config.json` | Gate commands, credential groups, and workspace-specific paths. Not committed. Template at `adapters/workspace_config.example.json`. |
 
 ---
 
 ## Adapters
 
-The `adapters/` directory holds workspace-specific configuration. The directory ships empty (with templates) until you customize it for your project. This keeps the core framework pure and reusable across any codebase.
+The `adapters/` directory holds workspace-specific configuration (credentials, env vars). The directory ships empty (with templates). This keeps the core framework pure and reusable across any codebase.
 
-Common adapter customizations:
-- Setting `require_asana_task: true` to block taskless implementation
-- Defining custom gate commands under `gates` (e.g., `"typecheck": "mypy src/"`)
-- Configuring credential groups for workspace-specific API tokens
+Policy configuration belongs at the workspace root in `.aof_policy.json` (see `.aof_policy.example.json`).
 
 ---
 

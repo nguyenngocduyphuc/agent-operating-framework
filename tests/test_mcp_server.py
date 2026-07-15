@@ -6,6 +6,7 @@ sending no further bytes. A hard queue.get(timeout=...) makes a regressed server
 FAIL FAST instead of hanging the suite forever.
 """
 import json
+import os
 import queue
 import subprocess
 import sys
@@ -28,6 +29,7 @@ class _Client:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env={**os.environ, "PYTHONPATH": str(REPO)},
         )
         self._q: queue.Queue = queue.Queue()
         self._t = threading.Thread(target=self._reader, daemon=True)
@@ -107,7 +109,7 @@ def test_full_oneshot_sequence(client):
     assert tools["result"]["tools"]
     call = client.request(
         "tools/call",
-        {"name": "check_contract", "arguments": {"brief": "Task:\nOwner:\nScope:\nDoD:\nDo not:\nStop if:\nReturn:\n"}},
+        {"name": "check_contract", "arguments": {"brief": "Task: add health\nOwner: worker\nScope: api/\nDoD: tests pass\nDo not: change db\nStop if: out of scope\nReturn: diff\n"}},
         req_id=3,
     )
     assert call["result"]["ok"] is True

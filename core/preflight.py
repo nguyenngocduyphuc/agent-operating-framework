@@ -134,8 +134,8 @@ def main():
         dirty = sh(["git", "-C", repo, "status", "--porcelain"])
         if branch in ("main", "master"):
             warns.append(f"On {branch}: create a feature branch per task before editing.")
-        if args.task and branch and args.task not in branch:
-            warns.append(f"Branch '{branch}' does not name task {args.task} -- confirm.")
+        if args.task and branch and branch not in ("main", "master", "HEAD") and args.task not in branch:
+            blockers.append(f"Branch '{branch}' is for a different task than {args.task}. Create the correct branch and retry.")
         if dirty and branch in ("main", "master"):
             warns.append("Uncommitted changes on a shared branch.")
 

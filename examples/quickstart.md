@@ -29,7 +29,16 @@ groups, and policy flags. Exit code 0 = ready; exit code 2 = fix first.
 
 Pass `--json` for machine-readable output.
 
-## 4. Configure env vars
+## 4. Configure policy (optional)
+
+Copy the policy template and tailor it:
+
+```bash
+cp .aof_policy.example.json .aof_policy.json
+# edit .aof_policy.json for your workspace
+```
+
+## 5. Configure env vars
 
 Copy the adapter template and fill in your values:
 
@@ -38,15 +47,15 @@ cp adapters/.env.example adapters/.env
 # edit adapters/.env with your tokens
 ```
 
-## 5. Create your first contract
+## 6. Create your first contract
 
 Create a task brief with an Execution Contract header. See
 `examples/contract_template.md`.
 
-## 6. Run the demo
+## 7. Run the demo
 
 ```bash
-python examples/demo.py
+python examples/full_flow_demo.py
 ```
 
 This runs preflight and a sample contract validation.

@@ -14,6 +14,8 @@ import time
 import uuid
 from pathlib import Path
 
+from core.check_contract import validate as validate_contract
+
 # ---------------------------------------------------------------------------
 # TOOLS catalog
 # ---------------------------------------------------------------------------
@@ -25,10 +27,10 @@ TOOLS = [
         "brief":{"type":"string"}},"required":["brief"]}},
     {"name":"operating_protocol","description":"Return OPERATING_PROTOCOL.md","inputSchema":{"type":"object","properties":{
         "workspace":{"type":"string"}}}},
-    {"name":"verify_gate","description":"Run quality gate (ruff|pytest|quality|custom) with optional multi-trial","inputSchema":{"type":"object","properties":{
+    {"name":"verify_gate","description":"Run quality gate (ruff|pytest|quality) with optional multi-trial","inputSchema":{"type":"object","properties":{
         "gate_type":{"type":"string"},"cwd":{"type":"string"},
         "extra_args":{"type":"array","items":{"type":"string"}},
-        "trials":{"type":"integer","minimum":1}}},
+        "trials":{"type":"integer","minimum":1,"maximum":10}}},
      "required":["gate_type"]},
     {"name":"audit_scope","description":"Check files against scope globs","inputSchema":{"type":"object","properties":{
         "scope":{"type":"array","items":{"type":"string"}},
@@ -47,18 +49,32 @@ TOOLS = [
 # Session state
 # ---------------------------------------------------------------------------
 SESSION_ID = str(uuid.uuid4())
-_state = {"session_id":SESSION_ID,"preflight_ok":False,"contract_ok":False,
-          "last_verify_status":None,"last_preflight":None}
+_state = {
+    "session_id": SESSION_ID,
+    "preflight_ok": False,
+    "contract_ok": False,
+    "last_verify_status": None,
+    "last_preflight": None,
+    "bound_workspace": None,
+    "bound_cwd": None,
+    "bound_task": None,
+    "contract_scope_parsed": None,
+    "scope_audit_ok": False,
+}
 AUDIT_LOG = Path.home()/".npflight"/"audit.jsonl"
 
-def _ensure_audit(): Path.home().joinpath(".npflight").mkdir(parents=True, exist_ok=True)
+def _ensure_audit():
+    Path.home().joinpath(".npflight").mkdir(parents=True, exist_ok=True)
+
 def _audit(entry):
     _ensure_audit()
-    entry["_session"]=SESSION_ID; entry["_ts"]=time.time()
+    entry["_session"] = SESSION_ID
+    entry["_ts"] = time.time()
     try:
-        with open(AUDIT_LOG,"a",encoding="utf-8") as f:
-            f.write(json.dumps(entry,ensure_ascii=False)+"\n")
-    except OSError: pass
+        with open(AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 def _ssl_context():
     """Certifi-based SSL context with lazy fallback."""
@@ -73,29 +89,42 @@ def _ssl_context():
 
 def _rfile(p):
     try:
-        with open(p,encoding="utf-8") as f: return f.read()
-    except Exception: return None
+        with open(p, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return None
 
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
 def _run_preflight(cwd,task,bootstrap):
     cmd=[sys.executable,"-m","core.preflight","--json"]
-    if task: cmd+=["--task",task]
-    if bootstrap: cmd.append("--bootstrap")
+    if task:
+        cmd+=["--task",task]
+    if bootstrap:
+        cmd.append("--bootstrap")
     try:
         r=subprocess.run(cmd,cwd=cwd or os.getcwd(),capture_output=True,text=True,timeout=30)
-        p=json.loads(r.stdout); p["exit_code"]=r.returncode; return p
-    except Exception as e: return {"error":str(e),"exit_code":2}
+        p=json.loads(r.stdout)
+        p["exit_code"]=r.returncode
+        return p
+    except Exception as e:
+        return {"error":str(e),"exit_code":2}
 
 def _check_contract(brief):
-    required=["Task","Owner","Scope","DoD","Do not","Stop if","Return"]
-    found=[f for f in required if f.lower() in brief.lower() or f in brief]
-    missing=[f for f in required if f not in found]
-    return {"ok":len(missing)==0,"found":found,"missing_required":missing}
+    return validate_contract(brief)
 
 def _verify_gate(gate_type,cwd,extra_args,trials):
-    cwd=cwd or os.getcwd(); extra=extra_args or []; trials=trials or 1
+    # P0-4: restrict gate names, cwd, and trials
+    ALLOWED_GATES = {"ruff", "pytest", "quality"}
+    if gate_type not in ALLOWED_GATES:
+        return {"gate_type":gate_type,"error":f"Gate '{gate_type}' not allowed. Use one of: {', '.join(sorted(ALLOWED_GATES))}",
+                "passed":False,"results":[]}
+    cwd=cwd or os.getcwd(); extra=extra_args or []; trials=min(trials or 1, 10)
+    # cwd must be under the preflight workspace
+    ws = _state.get("bound_workspace")
+    if ws and os.path.commonpath([ws]) != os.path.commonpath([ws, cwd]):
+        return {"gate_type":gate_type,"error":"cwd must be under the preflight workspace","passed":False,"results":[]}
     builtins={"ruff":[sys.executable,"-m","ruff","check","."],
               "pytest":[sys.executable,"-m","pytest","-x"],
               "quality":[sys.executable,"-m","compileall","-q","core"]}
@@ -185,10 +214,28 @@ def _call(rid,p):
         if n=="preflight":
             r=_run_preflight(a.get("cwd"),a.get("task"),a.get("bootstrap"))
             _state["preflight_ok"]=r.get("status")=="clear" and r.get("exit_code")==0
-            _state["last_preflight"]=r; return _rsp(rid,r)
+            _state["last_preflight"]=r
+            if _state["preflight_ok"]:
+                _state["bound_workspace"] = r.get("workspace")
+                _state["bound_cwd"] = a.get("cwd") or os.getcwd()
+                _state["bound_task"] = r.get("task")
+            else:
+                _state["bound_workspace"] = None
+                _state["bound_cwd"] = None
+                _state["bound_task"] = None
+            return _rsp(rid,r)
         if n=="check_contract":
             r=_check_contract(a.get("brief",""))
-            _state["contract_ok"]=r["ok"]; _audit({"event":"check_contract","ok":r["ok"]})
+            _state["contract_ok"]=r["ok"]
+            # Parse scope from contract when it passes
+            if r["ok"]:
+                for line in (a.get("brief","") or "").split("\n"):
+                    if line.startswith("Scope:") or line.startswith("Scope :"):
+                        scope_val = line.split(":", 1)[1].strip()
+                        if scope_val:
+                            _state["contract_scope_parsed"] = [s.strip() for s in scope_val.split(",")]
+                        break
+            _audit({"event":"check_contract","ok":r["ok"]})
             return _rsp(rid,r)
         if n=="operating_protocol":
             ws=a.get("workspace") or os.environ.get("AOF_WORKSPACE") or os.getcwd()
@@ -199,13 +246,14 @@ def _call(rid,p):
             if not _state["preflight_ok"]: return _err(rid,-32000,"Preflight not passed")
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
             r=_verify_gate(a["gate_type"],a.get("cwd"),a.get("extra_args"),a.get("trials"))
-            _state["last_verify_status"]="passed" if r["passed"] else "failed"
-            _audit({"event":"verify_gate","gate_type":a["gate_type"],"passed":r["passed"]})
+            _state["last_verify_status"]="passed" if r.get("passed") else "failed"
+            _audit({"event":"verify_gate","gate_type":a["gate_type"],"passed":r.get("passed")})
             return _rsp(rid,r)
         if n=="audit_scope":
             if not _state["preflight_ok"]: return _err(rid,-32000,"Preflight not passed")
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
             r=_audit_scope(a.get("scope",[]),a.get("changed_files",[]))
+            _state["scope_audit_ok"] = r["ok"]
             _audit({"event":"audit_scope","ok":r["ok"]}); return _rsp(rid,r)
         if n=="session_log":
             _audit({"event":a.get("event"),"data":a.get("data")}); return _rsp(rid,{"ok":True})
@@ -214,6 +262,11 @@ def _call(rid,p):
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
             if _state["last_verify_status"] != "passed":
                 return _err(rid,-32002,"A passing verify_gate is required before post_evidence")
+            if not _state["scope_audit_ok"]:
+                return _err(rid,-32003,"A passing audit_scope is required before post_evidence")
+            # P0-3: enforce task binding — reject cross-task evidence
+            if _state["bound_task"] and a.get("task_gid") and a["task_gid"] != _state["bound_task"]:
+                return _err(rid,-32004,f"task_gid '{a['task_gid']}' does not match preflighted task '{_state['bound_task']}'")
             resolution="Done" if a.get("exit_code",-1)==0 else "Blocked"
             # Local audit is UNCONDITIONAL and the source of truth.
             _audit({"event":"post_evidence","task_gid":a["task_gid"],"summary":a.get("summary"),

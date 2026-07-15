@@ -1,0 +1,23 @@
+target-version = "py310"
+line-length = 200
+
+# Catch real bugs only — not style preferences pervasive in this CLI-codebase.
+# Test files use assert; subprocess calls are intentionally with known args.
+lint.select = [
+    "F",    # pyflakes — real errors (undefined name, unused import)
+    "E",    # pycodestyle — formatting issues that could hide bugs
+    "W",    # pycodestyle warnings
+    "I",    # import sorting
+    "RUF1", # ruff-specific — detect unused noqa
+    "SIM",  # simplify — catch genuinely confusing patterns
+]
+lint.ignore = [
+    "E701",   # compound statement — pre-existing style
+    "E702",   # semicolons — pre-existing style
+    "E731",   # lambda assignment — used intentionally
+    "SIM105", # suppress — try/except/pass clearer
+    "SIM108", # ternary — if/else more readable
+    "SIM114", # combine conditions — readability preference
+    "SIM115", # open with context manager — nuanced
+    "RUF100", # unused noqa — needs manual cleanup, pre-existing
+]

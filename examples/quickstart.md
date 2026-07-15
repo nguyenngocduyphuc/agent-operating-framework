@@ -1,5 +1,7 @@
 # AOF Quickstart
 
+> 💡 **No-code?** See the [No-code quickstart](../README.md#no-code-quickstart) for copy-paste prompts you can use with Claude Code or Codex right away.
+
 Get an agent operating framework running in your workspace in 5 minutes.
 
 ## 1. Install

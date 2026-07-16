@@ -175,20 +175,64 @@ def test_gate_cwd_outside_workspace_blocked():
     mcp._state["bound_cwd"] = None
 
 
-def test_gate_cwd_inside_workspace_allowed():
-    """verify_gate with cwd inside preflight workspace must NOT block cwd."""
+def test_gate_cwd_mismatch_blocked():
+    """A gate cannot move to another directory after preflight."""
     import core.mcp_server as mcp
     from core.mcp_server import _verify_gate
     mcp._state["bound_workspace"] = "/tmp/aof-workspace"
     mcp._state["bound_cwd"] = "/tmp/aof-workspace/sub"
 
     r = _verify_gate("quality", "/tmp/aof-workspace/sub/project", [], 1)
-    assert "error" not in r, (
-        f"gate with cwd inside workspace should not block: {r.get('error')}"
-    )
+    assert not r.get("passed", True), "gate cwd must match the preflight cwd"
+    assert "preflight cwd" in r.get("error", "").lower()
 
     mcp._state["bound_workspace"] = None
     mcp._state["bound_cwd"] = None
+
+
+def test_scope_mismatch_blocked():
+    """audit_scope must use the checked contract, not a caller-supplied glob."""
+    from core.mcp_server import _call, _state
+
+    _state.update({"preflight_ok": True, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None})
+    contract = _call(20, {"id": 20, "name": "check_contract", "arguments": {
+        "brief": GOOD_CONTRACT,
+    }})
+    assert contract["result"]["ok"]
+
+    result = _call(21, {"id": 21, "name": "audit_scope", "arguments": {
+        "scope": ["**"],
+        "changed_files": ["out-of-scope/secrets.py"],
+    }})
+    assert "error" in result, "caller must not widen contract scope"
+    assert result["error"]["code"] == -32006
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None})
+
+
+def test_new_preflight_resets_prior_gate_state(monkeypatch):
+    """A new task cannot inherit completed gates from the previous task."""
+    import core.mcp_server as mcp
+
+    monkeypatch.setattr(mcp, "_run_preflight", lambda *_: {
+        "status": "clear", "exit_code": 0, "workspace": "/tmp/aof", "task": "TASK-B",
+    })
+    mcp._state.update({"preflight_ok": True, "contract_ok": True,
+                       "last_verify_status": "passed", "scope_audit_ok": True,
+                       "contract_scope_parsed": ["src/**"]})
+
+    result = mcp._call(22, {"id": 22, "name": "preflight", "arguments": {
+        "cwd": "/tmp/aof", "task": "TASK-B",
+    }})
+    assert result["result"]["status"] == "clear"
+    assert not mcp._state["contract_ok"]
+    assert mcp._state["last_verify_status"] is None
+    assert not mcp._state["scope_audit_ok"]
+    assert mcp._state["contract_scope_parsed"] is None
 
 
 # ===================================================================
@@ -318,7 +362,7 @@ def test_full_mcp_sequence_passes(tmp_path):
 
     # audit_scope
     as_req = {"id": 4, "name": "audit_scope", "arguments": {
-        "scope": ["src/api/**"],
+        "scope": ["src/api/health.py"],
         "changed_files": ["src/api/health.py"],
     }}
     as_r = _call(4, as_req)

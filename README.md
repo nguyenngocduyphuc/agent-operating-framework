@@ -15,9 +15,10 @@
 - **Verify gate** -- runs quality checks (ruff, pytest, custom gates) with optional multi-trial statistical pass for flaky tests.
 - **Evidence log** -- structured audit trail to `~/.npflight/audit.jsonl`. Every action is logged: decisions, gates, blockers, outcomes.
 
-## No-code quickstart
+## No-code pilot (beta)
 
-Paste one of these prompts into Claude Code or Codex (pilot hosts). No Python, JSON, or git knowledge needed.
+Paste one of these prompts into Claude Code or Codex (pilot hosts). This is a
+beta onboarding path; release claims wait for the pilot thresholds in the QA plan.
 
 ### Install
 
@@ -36,9 +37,9 @@ Plan it, keep scope safe, ask before risky actions, verify the result,
 and give me a plain-language evidence summary.
 ```
 
-### What to expect
+### Expected pilot states
 
-Your agent responds with one of four states:
+The host agent should respond with one of four states:
 
 | State | Meaning |
 |-------|---------|
@@ -56,7 +57,11 @@ Technical details (exit codes, JSON, MCP calls) stay hidden by default.
 ## Quickstart
 
 ```bash
-# 1. Clone or copy core/ into your project
+# 1. Copy the runtime and policy template into your project
+cp -R core .aof_policy.example.json your-project/
+# Optional: copy credential templates when you need integrations
+cp -R adapters your-project/
+cd your-project
 # 2. Create a workspace marker
 touch .agentframework
 # 3. Run preflight
@@ -119,8 +124,10 @@ The philosophy is contract-first, gate-on-path, evidence-before-done. Every task
 ## Installation
 
 ```bash
-# Copy into your project (lightweight, no deps)
-cp -r core/ your-project/
+# Required: runtime and policy template (lightweight, no deps)
+cp -R core .aof_policy.example.json your-project/
+# Optional: credential templates for integrations
+cp -R adapters your-project/
 ```
 
 > **Note**: AOF is designed to be copied directly into projects rather than installed as a package. This avoids dependency management complexity and ensures full control over the framework.

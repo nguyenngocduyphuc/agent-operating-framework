@@ -1,14 +1,14 @@
 # AOF Quickstart
 
-> 💡 **No-code?** See the [No-code quickstart](../README.md#no-code-quickstart) for copy-paste prompts you can use with Claude Code or Codex right away.
+> 💡 **No-code pilot?** See the [beta onboarding prompts](../README.md#no-code-pilot-beta) for Claude Code or Codex.
 
-Get an agent operating framework running in your workspace in 5 minutes.
+Start an agent operating framework in your workspace.
 
 ## 1. Install
 
 ```bash
-# Copy the core directory into your project
-cp -r path/to/aof/core/ your-project/core/
+# Copy the runtime and policy template into your project
+cp -R path/to/aof/core path/to/aof/.aof_policy.example.json your-project/
 ```
 
 ## 2. Create workspace marker
@@ -42,11 +42,12 @@ cp .aof_policy.example.json .aof_policy.json
 
 ## 5. Configure env vars
 
-Copy the adapter template and fill in your values:
+Copy the optional adapter template, then fill in your values:
 
 ```bash
-cp adapters/.env.example adapters/.env
-# edit adapters/.env with your tokens
+cp -R path/to/aof/adapters your-project/
+cp your-project/adapters/.env.example your-project/adapters/.env
+# edit your-project/adapters/.env with your tokens
 ```
 
 ## 6. Create your first contract

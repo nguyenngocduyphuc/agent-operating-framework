@@ -6,6 +6,21 @@
 
 > A lightweight operational gate for AI-agent workspaces -- prevents wrong-repo, wrong-branch, and ungrounded execution.
 
+## One-command setup
+
+```bash
+bash setup.sh your-project/
+```
+
+Or from a remote URL (no clone needed):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nguyenngocduyphuc/agent-operating-framework/main/setup.sh | bash -s -- your-project/
+```
+
+Runs preflight, configures the workspace marker, creates initial commit, and shows MCP
+registration. Idempotent -- safe to re-run on an existing AOF workspace.
+
 ## Features
 
 - **Preflight gate** -- detects workspace, repo, branch, and credential gaps before work starts. Exit 0 = ready, exit 2 = fix first.
@@ -64,6 +79,24 @@ You only see the state label and a plain-language summary.
 </details>
 
 > **Pilot hosts:** Claude Code and Codex first. Other hosts (Cursor, Gemini, etc.) added after the pilot.
+
+---
+
+## Results (measured, honest)
+
+> **Status: Beta.** These measurements come from controlled experiments. Release claims
+> wait for the pilot thresholds in the QA plan.
+
+| Metric | Bare (no AOF) | With AOF | Note |
+|--------|--------------|----------|------|
+| Scope adherence (stayed within task boundaries) | 43 % | **100 %** | n = 105 runs, 3 arms, p = 0.049 one‑sided Fisher — causal, significant |
+| Pass rate | 53.1 % | 64.7 % | Consistent trend across two independent runs; not individually significant at n ≈ 33 / arm |
+| Fabrication rate (claimed done, wasn't) | 46.9 % | 35.3 % | Separate scorer flag; tracks failed runs closely in this dataset — directional improvement |
+| Median wall‑time on gated tasks | baseline | + 35–36 % | Mitigated by risk‑lane activation (full chain only for risky task types) |
+
+**Method:** 5 deterministic tasks × 3 arms × 7 trials, isolated git worktree per run,
+same backend model in both arms. Benchmark code in the maintainers' workspace; results
+JSON available on request.
 
 ---
 

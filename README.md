@@ -48,9 +48,36 @@ The host agent should respond with one of four states:
 | **Blocked** | Can't proceed — wrong workspace, missing credentials, or unsafe request. |
 | **Done** | Goal met. Summary is plain language, not JSON or exit codes. |
 
-Technical details (exit codes, JSON, MCP calls) stay hidden by default.
+<details>
+<summary>How it works — technical overview</summary>
+
+When you paste either prompt, your agent:
+
+1. Calls `preflight` to verify workspace, repo, and credentials.
+2. Creates an **execution contract** from your goal — a scope-lock with Task, Owner, DoD, and Stop-if.
+3. Reports back its internal state: **Planning**, **Needs approval**, **Blocked**, or **Done**.
+4. On completion, writes structured evidence to `~/.npflight/audit.jsonl`.
+
+Exit codes (0 = success, 2 = blocker) and MCP calls are handled internally.
+You only see the state label and a plain-language summary.
+
+</details>
 
 > **Pilot hosts:** Claude Code and Codex first. Other hosts (Cursor, Gemini, etc.) added after the pilot.
+
+---
+
+## Troubleshooting — common install errors
+
+Symptom first, then a prompt you can paste for your agent to self-diagnose.
+
+| Symptom | Prompt for the agent |
+|---------|----------------------|
+| `python: command not found` | `Check which Python versions are installed, show the path, and suggest how to add it to PATH.` |
+| `Not an AOF workspace` / `.agentframework not found` | `Create a .agentframework marker at the workspace root and run preflight again. Tell me if preflight passes.` |
+| `JSON decode error` in `.aof_policy.json` | `Read .aof_policy.json, fix syntax errors, validate it, and confirm the file is valid JSON.` |
+| Agent says "MCP server not found" | `Run python -m core.mcp_server from the workspace root. If it errors, show the message. If it works, tell me to configure the MCP host.` |
+| `exit code 2` with unclear output | `Run python -m core.preflight --json and explain each field in plain language — what's missing and how to fix it.` |
 
 ---
 

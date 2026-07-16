@@ -120,11 +120,14 @@ def _verify_gate(gate_type,cwd,extra_args,trials):
     if gate_type not in ALLOWED_GATES:
         return {"gate_type":gate_type,"error":f"Gate '{gate_type}' not allowed. Use one of: {', '.join(sorted(ALLOWED_GATES))}",
                 "passed":False,"results":[]}
-    cwd=cwd or os.getcwd(); extra=extra_args or []; trials=min(trials or 1, 10)
+    cwd=os.path.realpath(cwd or os.getcwd()); extra=extra_args or []; trials=min(trials or 1, 10)
     # cwd must be under the preflight workspace
     ws = _state.get("bound_workspace")
-    if ws and os.path.commonpath([ws]) != os.path.commonpath([ws, cwd]):
+    if ws and os.path.commonpath([os.path.realpath(ws)]) != os.path.commonpath([os.path.realpath(ws), cwd]):
         return {"gate_type":gate_type,"error":"cwd must be under the preflight workspace","passed":False,"results":[]}
+    bound_cwd = _state.get("bound_cwd")
+    if bound_cwd and cwd != os.path.realpath(bound_cwd):
+        return {"gate_type":gate_type,"error":"cwd must match the preflight cwd","passed":False,"results":[]}
     builtins={"ruff":[sys.executable,"-m","ruff","check","."],
               "pytest":[sys.executable,"-m","pytest","-x"],
               "quality":[sys.executable,"-m","compileall","-q","core"]}
@@ -212,12 +215,14 @@ def _call(rid,p):
     n=p.get("name",""); a=p.get("arguments",{}) or {}
     try:
         if n=="preflight":
+            _state.update({"contract_ok": False, "last_verify_status": None,
+                           "contract_scope_parsed": None, "scope_audit_ok": False})
             r=_run_preflight(a.get("cwd"),a.get("task"),a.get("bootstrap"))
             _state["preflight_ok"]=r.get("status")=="clear" and r.get("exit_code")==0
             _state["last_preflight"]=r
             if _state["preflight_ok"]:
                 _state["bound_workspace"] = r.get("workspace")
-                _state["bound_cwd"] = a.get("cwd") or os.getcwd()
+                _state["bound_cwd"] = os.path.realpath(a.get("cwd") or os.getcwd())
                 _state["bound_task"] = r.get("task")
             else:
                 _state["bound_workspace"] = None
@@ -225,6 +230,9 @@ def _call(rid,p):
                 _state["bound_task"] = None
             return _rsp(rid,r)
         if n=="check_contract":
+            _state["last_verify_status"] = None
+            _state["contract_scope_parsed"] = None
+            _state["scope_audit_ok"] = False
             r=_check_contract(a.get("brief",""))
             _state["contract_ok"]=r["ok"]
             # Parse scope from contract when it passes
@@ -252,7 +260,11 @@ def _call(rid,p):
         if n=="audit_scope":
             if not _state["preflight_ok"]: return _err(rid,-32000,"Preflight not passed")
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
-            r=_audit_scope(a.get("scope",[]),a.get("changed_files",[]))
+            scope = _state.get("contract_scope_parsed")
+            if not scope: return _err(rid,-32005,"Contract scope is not available")
+            if a.get("scope") is not None and a["scope"] != scope:
+                return _err(rid,-32006,"scope must match the checked contract")
+            r=_audit_scope(scope,a.get("changed_files",[]))
             _state["scope_audit_ok"] = r["ok"]
             _audit({"event":"audit_scope","ok":r["ok"]}); return _rsp(rid,r)
         if n=="session_log":

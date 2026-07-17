@@ -132,13 +132,19 @@ def test_matching_branch_passes(tmp_path):
 def test_disallowed_gate_blocked():
     """verify_gate with a gate_type not in {ruff, pytest, quality} must block."""
     # Direct unit test on _verify_gate logic via MCP server import
+    from unittest import mock
+
     from core.mcp_server import _verify_gate
 
-    r = _verify_gate("true", os.getcwd(), [], 1)
+    with mock.patch("core.mcp_server.subprocess.run") as run:
+        r = _verify_gate("true", os.getcwd(), [], 1)
+        run.assert_not_called()
     assert not r.get("passed", True), "gate 'true' must be blocked"
     assert "not allowed" in r.get("error", "").lower(), "error must mention not allowed"
 
-    r = _verify_gate("rm", os.getcwd(), ["-rf", "/"], 1)
+    with mock.patch("core.mcp_server.subprocess.run") as run:
+        r = _verify_gate("rm", os.getcwd(), ["-rf", "/"], 1)
+        run.assert_not_called()
     assert not r.get("passed", True), "gate 'rm' must be blocked"
 
 
@@ -150,6 +156,27 @@ def test_allowed_gate_checks_runtime():
     # 'quality' is allowed; result should have 'gate_type' key, not an error
     assert "error" not in r, f"quality gate must not error: {r.get('error')}"
     assert r["gate_type"] == "quality"
+
+
+def test_quality_gate_not_compileall_only():
+    """quality must not use compileall-only as a false evidence proof."""
+    from unittest import mock
+
+    from core.mcp_server import _gate_commands
+
+    cmds = _gate_commands("quality", str(REPO), [])
+    assert cmds, "quality must resolve to at least one command"
+    flat = " ".join(" ".join(c) for c in cmds)
+    assert "compileall" not in flat, "quality must not be compileall-only"
+    # Must reuse project lint and/or tests
+    assert "ruff" in flat or "pytest" in flat
+
+    # Unknown gate never reaches subprocess
+    import core.mcp_server as mcp
+    with mock.patch.object(mcp.subprocess, "run") as run:
+        r = mcp._verify_gate("echo", str(REPO), ["pwned"], 1)
+    run.assert_not_called()
+    assert r["passed"] is False
 
 
 # ===================================================================
@@ -196,7 +223,8 @@ def test_scope_mismatch_blocked():
 
     _state.update({"preflight_ok": True, "contract_ok": False,
                    "last_verify_status": None, "scope_audit_ok": False,
-                   "contract_scope_parsed": None})
+                   "contract_scope_parsed": None,
+                   "scope_audit_task": None, "scope_audit_cwd": None})
     contract = _call(20, {"id": 20, "name": "check_contract", "arguments": {
         "brief": GOOD_CONTRACT,
     }})
@@ -211,7 +239,65 @@ def test_scope_mismatch_blocked():
 
     _state.update({"preflight_ok": False, "contract_ok": False,
                    "last_verify_status": None, "scope_audit_ok": False,
-                   "contract_scope_parsed": None})
+                   "contract_scope_parsed": None,
+                   "scope_audit_task": None, "scope_audit_cwd": None})
+
+
+def test_caller_changed_files_cannot_hide_out_of_scope_git(tmp_path):
+    """Caller-supplied changed_files is not evidence; git inventory is trusted."""
+    from unittest import mock
+
+    from core.mcp_server import _call, _state
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "src" / "api").mkdir(parents=True)
+    (tmp_path / "src" / "api" / "health.py").write_text("ok = True\n")
+    (tmp_path / "evil_out_of_scope.py").write_text("x = 1\n")
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True,
+        "last_verify_status": "passed", "scope_audit_ok": False,
+        "contract_scope_parsed": ["src/api/health.py"],
+        "bound_cwd": str(tmp_path), "bound_task": "TASK-SCOPE",
+        "scope_audit_task": None, "scope_audit_cwd": None,
+    })
+    # Adversary claims only the in-scope file; untracked evil still in git truth
+    result = _call(30, {"id": 30, "name": "audit_scope", "arguments": {
+        "scope": ["src/api/health.py"],
+        "changed_files": ["src/api/health.py"],
+    }})
+    assert "result" in result, f"expected result, got {result}"
+    assert result["result"]["ok"] is False
+    assert "evil_out_of_scope.py" in result["result"]["out_of_scope"]
+    assert result["result"].get("caller_changed_files_ignored") is True
+    assert _state["scope_audit_ok"] is False
+
+    # Honest git inventory with only in-scope file may pass
+    with mock.patch("core.mcp_server._git_inventory", return_value=["src/api/health.py"]):
+        result2 = _call(31, {"id": 31, "name": "audit_scope", "arguments": {
+            "scope": ["src/api/health.py"],
+            "changed_files": ["forged-only.py"],  # ignored
+        }})
+    assert result2["result"]["ok"] is True
+    assert _state["scope_audit_ok"] is True
+    assert _state["scope_audit_task"] == "TASK-SCOPE"
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None, "bound_cwd": None,
+                   "bound_task": None, "scope_audit_task": None,
+                   "scope_audit_cwd": None})
+
+
+def test_git_inventory_includes_untracked(tmp_path):
+    """Untracked paths must appear in trusted scope inventory."""
+    from core.mcp_server import _git_inventory
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "scratch" / "untracked_evil.py").write_text("pass\n")
+    files = _git_inventory(str(tmp_path))
+    assert "scratch/untracked_evil.py" in files
 
 
 def test_new_preflight_resets_prior_gate_state(monkeypatch):
@@ -249,6 +335,9 @@ def test_cross_task_evidence_blocked():
     _state["last_verify_status"] = "passed"
     _state["scope_audit_ok"] = True
     _state["bound_task"] = "TASK-A"
+    _state["bound_cwd"] = "/tmp/aof-workspace"
+    _state["scope_audit_task"] = "TASK-A"
+    _state["scope_audit_cwd"] = os.path.realpath("/tmp/aof-workspace")
 
     # Try posting evidence for "TASK-B"
     req = {"id": 10, "name": "post_evidence", "arguments": {
@@ -268,6 +357,44 @@ def test_cross_task_evidence_blocked():
     _state["last_verify_status"] = None
     _state["scope_audit_ok"] = False
     _state["bound_task"] = None
+    _state["bound_cwd"] = None
+    _state["scope_audit_task"] = None
+    _state["scope_audit_cwd"] = None
+
+
+def test_post_evidence_requires_bound_scope_audit():
+    """post_evidence rejects scope_audit_ok that is not bound to current task/cwd."""
+    from core.mcp_server import _call, _state
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True,
+        "last_verify_status": "passed", "scope_audit_ok": True,
+        "bound_task": "TASK-X", "bound_cwd": "/tmp/ws-a",
+        "scope_audit_task": "TASK-OLD",  # stale binding
+        "scope_audit_cwd": os.path.realpath("/tmp/ws-a"),
+    })
+    r = _call(13, {"id": 13, "name": "post_evidence", "arguments": {
+        "task_gid": "TASK-X", "summary": "stale scope", "exit_code": 0,
+    }})
+    assert "error" in r
+    assert r["error"]["code"] == -32003
+
+    _state.update({
+        "scope_audit_task": "TASK-X",
+        "scope_audit_cwd": os.path.realpath("/tmp/ws-other"),
+    })
+    r2 = _call(14, {"id": 14, "name": "post_evidence", "arguments": {
+        "task_gid": "TASK-X", "summary": "wrong cwd", "exit_code": 0,
+    }})
+    assert "error" in r2
+    assert r2["error"]["code"] == -32003
+
+    _state.update({
+        "preflight_ok": False, "contract_ok": False,
+        "last_verify_status": None, "scope_audit_ok": False,
+        "bound_task": None, "bound_cwd": None,
+        "scope_audit_task": None, "scope_audit_cwd": None,
+    })
 
 
 # ===================================================================
@@ -329,10 +456,15 @@ def test_evidence_needs_scope_audit():
 def test_full_mcp_sequence_passes(tmp_path):
     """preflight → check_contract → verify_gate → audit_scope → post_evidence
     must all pass for a valid task with matching branch."""
+    from unittest import mock
+
     from core.mcp_server import _call, _state
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "-C", tmp_path, "checkout", "-b", "fix/TASK-123-test"], check=True)
+    (tmp_path / "src" / "api").mkdir(parents=True)
+    (tmp_path / "src" / "api" / "health.py").write_text("ok = True\n")
+    # In-scope untracked file becomes trusted inventory
 
     # preflight
     _state.clear()
@@ -345,28 +477,41 @@ def test_full_mcp_sequence_passes(tmp_path):
     assert pf_r.returncode == 0, f"preflight failed: {pf_data}"
 
     # Now drive the rest through MCP _call with proper state
+    bound = os.path.realpath(str(tmp_path))
     _state["preflight_ok"] = True
     _state["bound_workspace"] = pf_data.get("workspace")
-    _state["bound_cwd"] = str(tmp_path)
+    _state["bound_cwd"] = bound
     _state["bound_task"] = "TASK-123"
+    _state["scope_audit_ok"] = False
+    _state["scope_audit_task"] = None
+    _state["scope_audit_cwd"] = None
 
     # check_contract
     cc_req = {"id": 2, "name": "check_contract", "arguments": {"brief": GOOD_CONTRACT}}
     cc_r = _call(2, cc_req)
     assert cc_r["result"]["ok"], f"contract failed: {cc_r}"
 
-    # verify_gate (quality = compileall, no deps)
-    vg_req = {"id": 3, "name": "verify_gate", "arguments": {"gate_type": "quality", "cwd": str(tmp_path)}}
-    vg_r = _call(3, vg_req)
+    # verify_gate (quality = ruff, and pytest only when not already under pytest)
+    with mock.patch("core.mcp_server.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        vg_req = {"id": 3, "name": "verify_gate", "arguments": {"gate_type": "quality", "cwd": bound}}
+        vg_r = _call(3, vg_req)
     assert vg_r["result"].get("passed", False), f"verify gate failed: {vg_r}"
+    # Must not invoke compileall
+    for call in run.call_args_list:
+        cmd = call.args[0] if call.args else call.kwargs.get("args")
+        assert "compileall" not in " ".join(str(x) for x in (cmd or [])), call
 
-    # audit_scope
+    # audit_scope uses git truth (in-scope untracked health.py)
     as_req = {"id": 4, "name": "audit_scope", "arguments": {
         "scope": ["src/api/health.py"],
-        "changed_files": ["src/api/health.py"],
+        "changed_files": [],  # ignored; must not be required as evidence
     }}
     as_r = _call(4, as_req)
     assert as_r["result"]["ok"], f"scope audit failed: {as_r}"
+    assert "src/api/health.py" in as_r["result"]["git_files"]
+    assert _state["scope_audit_task"] == "TASK-123"
+    assert _state["scope_audit_cwd"] == bound
 
     # post_evidence
     pe_req = {"id": 5, "name": "post_evidence", "arguments": {

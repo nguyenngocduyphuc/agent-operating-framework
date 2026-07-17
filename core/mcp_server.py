@@ -8,6 +8,7 @@ proven-in-production pattern in scripts/npflight_mcp.py. Stdlib only.
 import fnmatch
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -46,7 +47,7 @@ TOOLS = [
 ]
 
 # Explicit gate allowlist — unknown gates never execute as commands
-ALLOWED_GATES = frozenset({"ruff", "pytest", "quality"})
+ALLOWED_GATES = frozenset({"ruff", "pytest", "quality", "dod"})
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -65,6 +66,7 @@ _state = {
     "scope_audit_ok": False,
     "scope_audit_task": None,
     "scope_audit_cwd": None,
+    "contract_dod_cmd": None,
 }
 AUDIT_LOG = Path.home()/".npflight"/"audit.jsonl"
 
@@ -222,7 +224,29 @@ def _verify_gate(gate_type,cwd,extra_args,trials):
     bound_cwd = _state.get("bound_cwd")
     if bound_cwd and cwd != os.path.realpath(bound_cwd):
         return {"gate_type":gate_type,"error":"cwd must match the preflight cwd","passed":False,"results":[]}
-    cmds = _gate_commands(gate_type, cwd, extra)
+    if gate_type == "dod":
+        # P2: run ONLY the DoD-cmd bound from the checked contract. Never a
+        # caller-supplied command; never fall back to quality. Fail closed.
+        dod = _state.get("contract_dod_cmd")
+        if not dod:
+            return {"gate_type":gate_type,"error":"No DoD-cmd bound from contract; cannot run 'dod' gate",
+                    "passed":False,"results":[]}
+        # Reject shell control metacharacters — argv is executed shell=False, this is
+        # defense-in-depth so a DoD-cmd can never be crafted to inject via a shell.
+        if any(ch in dod for ch in ";|&$`<>()\n\\"):
+            return {"gate_type":gate_type,"error":"DoD-cmd contains shell metacharacters; refused",
+                    "passed":False,"results":[]}
+        try:
+            argv = shlex.split(dod)
+        except ValueError as e:
+            return {"gate_type":gate_type,"error":f"DoD-cmd could not be parsed: {e}",
+                    "passed":False,"results":[]}
+        if not argv:
+            return {"gate_type":gate_type,"error":"DoD-cmd is empty after parsing",
+                    "passed":False,"results":[]}
+        cmds = [argv]
+    else:
+        cmds = _gate_commands(gate_type, cwd, extra)
     if not cmds:
         return {"gate_type":gate_type,"error":f"Gate '{gate_type}' has no resolvable command",
                 "passed":False,"results":[]}
@@ -320,7 +344,8 @@ def _call(rid,p):
         if n=="preflight":
             _state.update({"contract_ok": False, "last_verify_status": None,
                            "contract_scope_parsed": None, "scope_audit_ok": False,
-                           "scope_audit_task": None, "scope_audit_cwd": None})
+                           "scope_audit_task": None, "scope_audit_cwd": None,
+                           "contract_dod_cmd": None})
             r=_run_preflight(a.get("cwd"),a.get("task"),a.get("bootstrap"))
             _state["preflight_ok"]=r.get("status")=="clear" and r.get("exit_code")==0
             _state["last_preflight"]=r
@@ -339,8 +364,11 @@ def _call(rid,p):
             _state["scope_audit_ok"] = False
             _state["scope_audit_task"] = None
             _state["scope_audit_cwd"] = None
+            _state["contract_dod_cmd"] = None
             r=_check_contract(a.get("brief",""))
             _state["contract_ok"]=r["ok"]
+            # P2: bind optional DoD-cmd to session (opt-in verify target)
+            _state["contract_dod_cmd"] = r.get("dod_cmd") if r["ok"] else None
             # Parse scope from contract when it passes
             if r["ok"]:
                 for line in (a.get("brief","") or "").split("\n"):

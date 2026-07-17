@@ -13,14 +13,21 @@ REQUIRED = ("Task", "Owner", "Scope", "DoD", "Do not", "Stop if", "Return")
 def validate(brief: str) -> dict:
     lines = brief.split("\n")
     found = []
+    dod_cmd = None
     for line in lines:
         for field in REQUIRED:
             if line.startswith(field + ":"):
                 val = line[len(field) + 1:].strip()
                 if val and field not in found:
                     found.append(field)
+        # OPTIONAL line-start field — never part of REQUIRED (backward compatible)
+        if dod_cmd is None and line.startswith("DoD-cmd:"):
+            cmd_val = line[len("DoD-cmd:"):].strip()
+            if cmd_val:
+                dod_cmd = cmd_val
     missing = [f for f in REQUIRED if f not in found]
-    return {"ok": not missing, "found": found, "missing_required": missing}
+    return {"ok": not missing, "found": found, "missing_required": missing,
+            "dod_cmd": dod_cmd}
 
 
 def main() -> None:

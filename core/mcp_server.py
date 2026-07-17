@@ -32,9 +32,9 @@ TOOLS = [
         "extra_args":{"type":"array","items":{"type":"string"}},
         "trials":{"type":"integer","minimum":1,"maximum":10}}},
      "required":["gate_type"]},
-    {"name":"audit_scope","description":"Check files against scope globs","inputSchema":{"type":"object","properties":{
+    {"name":"audit_scope","description":"Check git-derived changed paths against contract scope globs","inputSchema":{"type":"object","properties":{
         "scope":{"type":"array","items":{"type":"string"}},
-        "changed_files":{"type":"array","items":{"type":"string"}}},"required":["scope","changed_files"]}},
+        "changed_files":{"type":"array","items":{"type":"string"}}},"required":["scope"]}},
     {"name":"session_log","description":"Append event to ~/.npflight/audit.jsonl","inputSchema":{"type":"object","properties":{
         "event":{"type":"string","description":"goal|decision|dead-end|file|question"},
         "data":{"type":"object"}},"required":["event","data"]}},
@@ -44,6 +44,9 @@ TOOLS = [
         "references":{"type":"array","items":{"type":"string"}},
         "duration_s":{"type":"number"}},"required":["task_gid","summary"]}},
 ]
+
+# Explicit gate allowlist — unknown gates never execute as commands
+ALLOWED_GATES = frozenset({"ruff", "pytest", "quality"})
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -60,6 +63,8 @@ _state = {
     "bound_task": None,
     "contract_scope_parsed": None,
     "scope_audit_ok": False,
+    "scope_audit_task": None,
+    "scope_audit_cwd": None,
 }
 AUDIT_LOG = Path.home()/".npflight"/"audit.jsonl"
 
@@ -114,9 +119,98 @@ def _run_preflight(cwd,task,bootstrap):
 def _check_contract(brief):
     return validate_contract(brief)
 
+def _git_run(args, cwd, timeout=15):
+    """Fixed-argv git helper. Returns (ok, stdout_str, returncode). Never shell."""
+    try:
+        r = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True,
+            timeout=timeout, shell=False,
+        )
+        return r.returncode == 0, (r.stdout or ""), r.returncode
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False, "", -1
+
+def _normalize_path(p: str) -> str:
+    s = (p or "").strip().replace("\\", "/")
+    while s.startswith("./"):
+        s = s[2:]
+    return s
+
+def _git_inventory(cwd: str) -> list:
+    """Changed-file inventory from trusted git state (staged/unstaged/untracked + base diff)."""
+    if not cwd or not os.path.isdir(cwd):
+        raise RuntimeError("bound_cwd missing or not a directory")
+    ok, out, _ = _git_run(["rev-parse", "--is-inside-work-tree"], cwd)
+    if not ok or out.strip() != "true":
+        raise RuntimeError("not a git repository")
+
+    files = set()
+
+    base_ref = None
+    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
+        ok_r, _, _ = _git_run(["rev-parse", "--verify", ref], cwd)
+        if ok_r:
+            base_ref = ref
+            break
+    if base_ref:
+        ok_mb, mb_out, _ = _git_run(["merge-base", "HEAD", base_ref], cwd)
+        mb = mb_out.strip() if ok_mb else ""
+        if mb:
+            ok_d, diff_out, _ = _git_run(["diff", "--name-only", f"{mb}...HEAD"], cwd)
+            if not ok_d:
+                ok_d, diff_out, _ = _git_run(["diff", "--name-only", mb, "HEAD"], cwd)
+            if not ok_d:
+                raise RuntimeError("git merge-base committed diff failed")
+            for line in diff_out.splitlines():
+                n = _normalize_path(line)
+                if n:
+                    files.add(n)
+
+    ok_s, staged, _ = _git_run(["diff", "--name-only", "--cached"], cwd)
+    if not ok_s:
+        raise RuntimeError("git staged diff failed")
+    for line in staged.splitlines():
+        n = _normalize_path(line)
+        if n:
+            files.add(n)
+
+    ok_u, unstaged, _ = _git_run(["diff", "--name-only"], cwd)
+    if not ok_u:
+        raise RuntimeError("git unstaged diff failed")
+    for line in unstaged.splitlines():
+        n = _normalize_path(line)
+        if n:
+            files.add(n)
+
+    ok_t, untracked, _ = _git_run(["ls-files", "--others", "--exclude-standard"], cwd)
+    if not ok_t:
+        raise RuntimeError("git untracked listing failed")
+    for line in untracked.splitlines():
+        n = _normalize_path(line)
+        if n:
+            files.add(n)
+
+    return sorted(files)
+
+def _gate_commands(gate_type, cwd, extra):
+    """Resolve allowlisted gate to fixed argv list(s). Never shell; never use gate_type as cmd."""
+    extra = list(extra or [])
+    if gate_type == "ruff":
+        return [[sys.executable, "-m", "ruff", "check", "."] + extra]
+    if gate_type == "pytest":
+        return [[sys.executable, "-m", "pytest", "-x"] + extra]
+    if gate_type == "quality":
+        # Meaningful portable proof: project lint + tests when present.
+        # Never treat byte-compilation alone as quality evidence.
+        cmds = [[sys.executable, "-m", "ruff", "check", "."] + extra]
+        # Avoid re-entrant full suite when already under pytest.
+        if (Path(cwd) / "tests").is_dir() and not os.environ.get("PYTEST_CURRENT_TEST"):
+            cmds.append([sys.executable, "-m", "pytest", "-x", "tests"] + extra)
+        return cmds
+    return None
+
 def _verify_gate(gate_type,cwd,extra_args,trials):
-    # P0-4: restrict gate names, cwd, and trials
-    ALLOWED_GATES = {"ruff", "pytest", "quality"}
+    # P0: restrict gate names, cwd, and trials — unknown never executes
     if gate_type not in ALLOWED_GATES:
         return {"gate_type":gate_type,"error":f"Gate '{gate_type}' not allowed. Use one of: {', '.join(sorted(ALLOWED_GATES))}",
                 "passed":False,"results":[]}
@@ -128,21 +222,30 @@ def _verify_gate(gate_type,cwd,extra_args,trials):
     bound_cwd = _state.get("bound_cwd")
     if bound_cwd and cwd != os.path.realpath(bound_cwd):
         return {"gate_type":gate_type,"error":"cwd must match the preflight cwd","passed":False,"results":[]}
-    builtins={"ruff":[sys.executable,"-m","ruff","check","."],
-              "pytest":[sys.executable,"-m","pytest","-x"],
-              "quality":[sys.executable,"-m","compileall","-q","core"]}
+    cmds = _gate_commands(gate_type, cwd, extra)
+    if not cmds:
+        return {"gate_type":gate_type,"error":f"Gate '{gate_type}' has no resolvable command",
+                "passed":False,"results":[]}
     results,passes=[],0
     for i in range(trials):
-        cmd=(builtins.get(gate_type) or [gate_type])+extra
-        try:
-            r=subprocess.run(cmd,cwd=cwd,capture_output=True,text=True,timeout=120)
-            ok=r.returncode==0
-            results.append({"trial":i+1,"exit_code":r.returncode,"ok":ok})
-            if ok: passes+=1
-        except subprocess.TimeoutExpired:
-            results.append({"trial":i+1,"exit_code":-1,"ok":False,"error":"timeout"})
-        except Exception as e:
-            results.append({"trial":i+1,"exit_code":-1,"ok":False,"error":str(e)})
+        trial_ok = True
+        trial_detail = []
+        for cmd in cmds:
+            try:
+                r=subprocess.run(cmd,cwd=cwd,capture_output=True,text=True,timeout=120,shell=False)
+                step_ok=r.returncode==0
+                trial_detail.append({"cmd":cmd,"exit_code":r.returncode,"ok":step_ok})
+                if not step_ok:
+                    trial_ok = False
+            except subprocess.TimeoutExpired:
+                trial_detail.append({"cmd":cmd,"exit_code":-1,"ok":False,"error":"timeout"})
+                trial_ok = False
+            except Exception as e:
+                trial_detail.append({"cmd":cmd,"exit_code":-1,"ok":False,"error":str(e)})
+                trial_ok = False
+        results.append({"trial":i+1,"ok":trial_ok,"steps":trial_detail,
+                        "exit_code":0 if trial_ok else 1})
+        if trial_ok: passes+=1
     pr=passes/max(trials,1)*100
     return {"gate_type":gate_type,"trials":trials,"passes":passes,
             "pass_rate":round(pr,1),"passed":pr>=80.0 if trials>=3 else passes==trials,
@@ -216,7 +319,8 @@ def _call(rid,p):
     try:
         if n=="preflight":
             _state.update({"contract_ok": False, "last_verify_status": None,
-                           "contract_scope_parsed": None, "scope_audit_ok": False})
+                           "contract_scope_parsed": None, "scope_audit_ok": False,
+                           "scope_audit_task": None, "scope_audit_cwd": None})
             r=_run_preflight(a.get("cwd"),a.get("task"),a.get("bootstrap"))
             _state["preflight_ok"]=r.get("status")=="clear" and r.get("exit_code")==0
             _state["last_preflight"]=r
@@ -233,6 +337,8 @@ def _call(rid,p):
             _state["last_verify_status"] = None
             _state["contract_scope_parsed"] = None
             _state["scope_audit_ok"] = False
+            _state["scope_audit_task"] = None
+            _state["scope_audit_cwd"] = None
             r=_check_contract(a.get("brief",""))
             _state["contract_ok"]=r["ok"]
             # Parse scope from contract when it passes
@@ -261,12 +367,39 @@ def _call(rid,p):
             if not _state["preflight_ok"]: return _err(rid,-32000,"Preflight not passed")
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
             scope = _state.get("contract_scope_parsed")
-            if not scope: return _err(rid,-32005,"Contract scope is not available")
+            if not scope:
+                _state["scope_audit_ok"] = False
+                _state["scope_audit_task"] = None
+                _state["scope_audit_cwd"] = None
+                return _err(rid,-32005,"Contract scope is not available")
             if a.get("scope") is not None and a["scope"] != scope:
+                _state["scope_audit_ok"] = False
+                _state["scope_audit_task"] = None
+                _state["scope_audit_cwd"] = None
                 return _err(rid,-32006,"scope must match the checked contract")
-            r=_audit_scope(scope,a.get("changed_files",[]))
+            # Trusted inventory only — never use caller changed_files as evidence
+            cwd = _state.get("bound_cwd") or os.getcwd()
+            try:
+                git_files = _git_inventory(cwd)
+            except Exception as e:
+                _state["scope_audit_ok"] = False
+                _state["scope_audit_task"] = None
+                _state["scope_audit_cwd"] = None
+                _audit({"event":"audit_scope","ok":False,"error":str(e)})
+                return _err(rid,-32007,f"git inventory failed (fail closed): {e}")
+            r=_audit_scope(scope, git_files)
+            r["git_files"] = list(git_files)
+            r["scope_source"] = "git+contract"
+            r["caller_changed_files_ignored"] = True
             _state["scope_audit_ok"] = r["ok"]
-            _audit({"event":"audit_scope","ok":r["ok"]}); return _rsp(rid,r)
+            if r["ok"]:
+                _state["scope_audit_task"] = _state.get("bound_task")
+                _state["scope_audit_cwd"] = os.path.realpath(cwd)
+            else:
+                _state["scope_audit_task"] = None
+                _state["scope_audit_cwd"] = None
+            _audit({"event":"audit_scope","ok":r["ok"],"git_files":git_files})
+            return _rsp(rid,r)
         if n=="session_log":
             _audit({"event":a.get("event"),"data":a.get("data")}); return _rsp(rid,{"ok":True})
         if n=="post_evidence":
@@ -276,6 +409,13 @@ def _call(rid,p):
                 return _err(rid,-32002,"A passing verify_gate is required before post_evidence")
             if not _state["scope_audit_ok"]:
                 return _err(rid,-32003,"A passing audit_scope is required before post_evidence")
+            # Trusted scope audit must be for the currently bound task/workspace
+            bound_task = _state.get("bound_task")
+            bound_cwd = _state.get("bound_cwd")
+            if bound_task is not None and _state.get("scope_audit_task") != bound_task:
+                return _err(rid,-32003,"scope audit is not bound to the current task")
+            if bound_cwd and _state.get("scope_audit_cwd") != os.path.realpath(bound_cwd):
+                return _err(rid,-32003,"scope audit is not bound to the current workspace")
             # P0-3: enforce task binding — reject cross-task evidence
             if _state["bound_task"] and a.get("task_gid") and a["task_gid"] != _state["bound_task"]:
                 return _err(rid,-32004,f"task_gid '{a['task_gid']}' does not match preflighted task '{_state['bound_task']}'")

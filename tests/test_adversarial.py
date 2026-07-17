@@ -619,3 +619,75 @@ def test_committed_out_of_scope_caught_without_origin(tmp_path):
                    "scope_audit_cwd": None, "scope_audit_sig": None})
 
 
+def test_empty_repo_still_uses_working_union(tmp_path):
+    """A repo with NO commits (unborn HEAD): root resolution fails, so audit must
+    fall back to the working-tree union without crashing, and snapshot a signature."""
+    from core.mcp_server import _call, _state
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "feature.py").write_text("ok = True\n")  # untracked, in scope
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True, "last_verify_status": "passed",
+        "scope_audit_ok": False, "contract_scope_parsed": ["src/feature.py"],
+        "bound_cwd": str(tmp_path), "bound_task": "TASK-EMPTY",
+        "scope_audit_task": None, "scope_audit_cwd": None, "scope_audit_sig": None,
+    })
+    r = _call(41, {"id": 41, "name": "audit_scope", "arguments": {
+        "scope": ["src/feature.py"], "changed_files": [],
+    }})
+    assert "result" in r, r
+    assert r["result"]["ok"] is True, "in-scope untracked file must pass on empty repo"
+    assert "src/feature.py" in r["result"]["git_files"]
+    assert _state["scope_audit_sig"] is not None, "audit must snapshot a signature"
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None, "bound_cwd": None,
+                   "bound_task": None, "scope_audit_task": None,
+                   "scope_audit_cwd": None, "scope_audit_sig": None})
+
+
+def test_toctou_post_evidence_rejects_changed_git(tmp_path):
+    """audit_scope passes, then a new commit changes git state → post_evidence must
+    reject with -32009 (TOCTOU), never trust the stale scope_audit_ok flag."""
+    from core.mcp_server import _call, _state
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "README.md").write_text("# base\n")
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    # in-scope untracked file present at audit time
+    (tmp_path / "src" / "api").mkdir(parents=True)
+    (tmp_path / "src" / "api" / "health.py").write_text("ok = True\n")
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True, "last_verify_status": "passed",
+        "scope_audit_ok": False, "contract_scope_parsed": ["src/api/health.py"],
+        "bound_cwd": str(tmp_path), "bound_task": "TASK-TOCTOU",
+        "scope_audit_task": None, "scope_audit_cwd": None, "scope_audit_sig": None,
+    })
+    a = _call(42, {"id": 42, "name": "audit_scope", "arguments": {
+        "scope": ["src/api/health.py"], "changed_files": [],
+    }})
+    assert a["result"]["ok"] is True, f"audit should pass first: {a}"
+
+    # Adversary now commits an out-of-scope file AFTER the audit passed.
+    (tmp_path / "secret_exfil.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "secret_exfil.py")
+    _git(tmp_path, "commit", "-q", "-m", "sneak")
+
+    pe = _call(43, {"id": 43, "name": "post_evidence", "arguments": {
+        "task_gid": "TASK-TOCTOU", "summary": "closeout after tampering", "exit_code": 0,
+    }})
+    assert "error" in pe, f"expected TOCTOU rejection, got {pe}"
+    assert pe["error"]["code"] == -32009, pe
+    assert "re-run audit_scope" in pe["error"]["message"]
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None, "bound_cwd": None,
+                   "bound_task": None, "scope_audit_task": None,
+                   "scope_audit_cwd": None, "scope_audit_sig": None})
+

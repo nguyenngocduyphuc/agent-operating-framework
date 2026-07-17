@@ -148,25 +148,47 @@ def _git_inventory(cwd: str) -> list:
 
     files = set()
 
+    # Resolve a committed diff base. Only a REMOTE ref is a trustworthy divergence
+    # point; a local main/master on a solo repo is often == HEAD (empty diff), so
+    # committed out-of-scope work would vanish. When no remote base resolves (or its
+    # merge-base fails), fall back to the repo root commit(s) and diff root..HEAD so
+    # EVERY committed change on the branch stays in the inventory (fail-closed superset).
     base_ref = None
-    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
+    for ref in ("origin/HEAD", "origin/main", "origin/master"):
         ok_r, _, _ = _git_run(["rev-parse", "--verify", ref], cwd)
         if ok_r:
             base_ref = ref
             break
+
+    committed_base = None
     if base_ref:
         ok_mb, mb_out, _ = _git_run(["merge-base", "HEAD", base_ref], cwd)
         mb = mb_out.strip() if ok_mb else ""
         if mb:
-            ok_d, diff_out, _ = _git_run(["diff", "--name-only", f"{mb}...HEAD"], cwd)
-            if not ok_d:
-                ok_d, diff_out, _ = _git_run(["diff", "--name-only", mb, "HEAD"], cwd)
-            if not ok_d:
-                raise RuntimeError("git merge-base committed diff failed")
-            for line in diff_out.splitlines():
-                n = _normalize_path(line)
-                if n:
-                    files.add(n)
+            committed_base = mb
+
+    def _add_committed_diff(base):
+        ok_d, diff_out, _ = _git_run(["diff", "--name-only", f"{base}...HEAD"], cwd)
+        if not ok_d:
+            ok_d, diff_out, _ = _git_run(["diff", "--name-only", base, "HEAD"], cwd)
+        if not ok_d:
+            raise RuntimeError("git committed diff failed")
+        for line in diff_out.splitlines():
+            n = _normalize_path(line)
+            if n:
+                files.add(n)
+
+    if committed_base is not None:
+        _add_committed_diff(committed_base)
+    else:
+        # No remote base_ref (or merge-base failed). Diff from root commit(s).
+        # A merged history can have >1 root — union each root..HEAD to stay a superset.
+        ok_root, root_out, _ = _git_run(["rev-list", "--max-parents=0", "HEAD"], cwd)
+        roots = [r.strip() for r in root_out.splitlines() if r.strip()] if ok_root else []
+        for root in roots:
+            _add_committed_diff(root)
+        # If no root resolves (repo has no commits / unborn HEAD), fall through to
+        # the working-tree union below — never crash.
 
     ok_s, staged, _ = _git_run(["diff", "--name-only", "--cached"], cwd)
     if not ok_s:

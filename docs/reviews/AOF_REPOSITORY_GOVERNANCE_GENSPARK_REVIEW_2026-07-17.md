@@ -168,6 +168,7 @@ DeepSeek audit confidence: **75/100**. Assessment: many claims lack matching cit
 | **Single collaborator** | Fact | Collaborators API returned only `nguyenngocduyphuc` (admin). |
 | **Mandatory review not applied** | Fact + intentional decision | Requiring 1+ approving reviewers with only one collaborator can **self-lock merges**. Plan/stop-rule: report rather than apply. |
 | **Local-only control** | Inference | Agents or humans who skip preflight, or consumers without `expected_repository`, are not blocked by GitHub. |
+| **Intentional remote bypass** | Fact / boundary | The check reads only `origin`; an actor can change `origin` or push via another remote. This control prevents accidental wrong-repository work, not deliberate local bypass. |
 | **Parser surface** | Fact | Non-GitHub hosts, unusual URL forms, and multi-remote setups beyond `origin` are unparseable/out of scope → block only when policy is set. |
 | **Policy file location** | Fact | Policy is loaded from workspace root (or `AOF_POLICY_FILE`), not from package install path alone — wrong workspace root can load wrong policy. |
 | **Research overclaim risk** | Fact (audit) | External memo is not a compliance certificate. |

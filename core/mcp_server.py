@@ -263,7 +263,7 @@ def _verify_gate(gate_type,cwd,extra_args,trials):
                     "passed":False,"results":[]}
         # Reject shell control metacharacters — argv is executed shell=False, this is
         # defense-in-depth so a DoD-cmd can never be crafted to inject via a shell.
-        if any(ch in dod for ch in ";|&$`<>()\n\\"):
+        if any(ch in dod for ch in ";|&$`<>()\n\r\\"):
             return {"gate_type":gate_type,"error":"DoD-cmd contains shell metacharacters; refused",
                     "passed":False,"results":[]}
         try:

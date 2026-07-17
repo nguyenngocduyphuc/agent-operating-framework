@@ -525,3 +525,169 @@ def test_full_mcp_sequence_passes(tmp_path):
 
     # Cleanup
     _state.clear()
+
+# ===================================================================
+# 10. P2 — DoD-cmd is bound from the contract and never caller-controlled
+# ===================================================================
+
+def test_dod_cmd_runs_stored_command_only(tmp_path):
+    """gate_type='dod' runs ONLY the contract-bound DoD-cmd (a failing check here),
+    never a caller-supplied command, and never falls back to quality."""
+    from core.mcp_server import _state, _verify_gate
+
+    failing = tmp_path / "failing_check.py"
+    failing.write_text("import sys\nsys.exit(1)\n")
+
+    _state["bound_workspace"] = str(tmp_path)
+    _state["bound_cwd"] = os.path.realpath(str(tmp_path))
+    _state["contract_dod_cmd"] = f"{sys.executable} {failing}"
+
+    r = _verify_gate("dod", str(tmp_path), ["--attacker-supplied"], 1)
+    assert "error" not in r, f"dod gate must execute, not error: {r.get('error')}"
+    assert r["passed"] is False, "a failing DoD-cmd must yield passed=False"
+    ran = " ".join(str(x) for x in r["results"][0]["steps"][0]["cmd"])
+    assert str(failing) in ran, "the stored DoD-cmd must be the command executed"
+    assert "--attacker-supplied" not in ran, "caller args must not reach the command"
+
+    _state["bound_workspace"] = None
+    _state["bound_cwd"] = None
+    _state["contract_dod_cmd"] = None
+
+
+def test_contract_without_dodcmd_still_valid():
+    """A standard 7-field contract with NO DoD-cmd stays valid and closes through
+    the unchanged quality/pytest path (opt-in DoD is backward compatible)."""
+    from core.mcp_server import _gate_commands
+
+    r = check_contract.validate(GOOD_CONTRACT)
+    assert r["ok"], "7-field contract must pass"
+    assert "dod_cmd" in r, "return dict must expose dod_cmd (backward-compatible field)"
+    assert r["dod_cmd"] is None, "no DoD-cmd line -> None"
+
+    cmds = _gate_commands("quality", str(REPO), [])
+    assert cmds, "quality gate must still resolve without a DoD-cmd"
+    flat = " ".join(" ".join(c) for c in cmds)
+    assert "ruff" in flat or "pytest" in flat, "quality path unchanged"
+
+# ===================================================================
+# 9. P0 — committed out-of-scope files without origin must be caught
+# ===================================================================
+
+def _git(cwd, *args):
+    subprocess.run(
+        ["git", "-C", str(cwd), "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        check=True, capture_output=True,
+    )
+
+
+def test_committed_out_of_scope_caught_without_origin(tmp_path):
+    """A repo with NO origin: a file committed on the branch outside scope must
+    still appear in the trusted inventory and be flagged out-of-scope."""
+    from core.mcp_server import _call, _state
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    # commit 1 = base/root commit (unrelated file)
+    (tmp_path / "README.md").write_text("# base\n")
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    # commit 2 = branch work: in-scope + out-of-scope, all COMMITTED, no remote
+    (tmp_path / "src" / "api").mkdir(parents=True)
+    (tmp_path / "src" / "api" / "health.py").write_text("ok = True\n")
+    (tmp_path / "secret_exfil.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "work")
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True, "last_verify_status": "passed",
+        "scope_audit_ok": False, "contract_scope_parsed": ["src/api/health.py"],
+        "bound_cwd": str(tmp_path), "bound_task": "TASK-P0",
+        "scope_audit_task": None, "scope_audit_cwd": None, "scope_audit_sig": None,
+    })
+    r = _call(40, {"id": 40, "name": "audit_scope", "arguments": {
+        "scope": ["src/api/health.py"],
+        "changed_files": ["src/api/health.py"],  # adversary hides the committed file
+    }})
+    assert "result" in r, r
+    assert r["result"]["ok"] is False, "committed out-of-scope file must be flagged"
+    assert "secret_exfil.py" in r["result"]["out_of_scope"]
+    assert "secret_exfil.py" in r["result"]["git_files"]
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None, "bound_cwd": None,
+                   "bound_task": None, "scope_audit_task": None,
+                   "scope_audit_cwd": None, "scope_audit_sig": None})
+
+
+def test_empty_repo_still_uses_working_union(tmp_path):
+    """A repo with NO commits (unborn HEAD): root resolution fails, so audit must
+    fall back to the working-tree union without crashing, and snapshot a signature."""
+    from core.mcp_server import _call, _state
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "feature.py").write_text("ok = True\n")  # untracked, in scope
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True, "last_verify_status": "passed",
+        "scope_audit_ok": False, "contract_scope_parsed": ["src/feature.py"],
+        "bound_cwd": str(tmp_path), "bound_task": "TASK-EMPTY",
+        "scope_audit_task": None, "scope_audit_cwd": None, "scope_audit_sig": None,
+    })
+    r = _call(41, {"id": 41, "name": "audit_scope", "arguments": {
+        "scope": ["src/feature.py"], "changed_files": [],
+    }})
+    assert "result" in r, r
+    assert r["result"]["ok"] is True, "in-scope untracked file must pass on empty repo"
+    assert "src/feature.py" in r["result"]["git_files"]
+    assert _state["scope_audit_sig"] is not None, "audit must snapshot a signature"
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None, "bound_cwd": None,
+                   "bound_task": None, "scope_audit_task": None,
+                   "scope_audit_cwd": None, "scope_audit_sig": None})
+
+
+def test_toctou_post_evidence_rejects_changed_git(tmp_path):
+    """audit_scope passes, then a new commit changes git state → post_evidence must
+    reject with -32009 (TOCTOU), never trust the stale scope_audit_ok flag."""
+    from core.mcp_server import _call, _state
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "README.md").write_text("# base\n")
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    # in-scope untracked file present at audit time
+    (tmp_path / "src" / "api").mkdir(parents=True)
+    (tmp_path / "src" / "api" / "health.py").write_text("ok = True\n")
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True, "last_verify_status": "passed",
+        "scope_audit_ok": False, "contract_scope_parsed": ["src/api/health.py"],
+        "bound_cwd": str(tmp_path), "bound_task": "TASK-TOCTOU",
+        "scope_audit_task": None, "scope_audit_cwd": None, "scope_audit_sig": None,
+    })
+    a = _call(42, {"id": 42, "name": "audit_scope", "arguments": {
+        "scope": ["src/api/health.py"], "changed_files": [],
+    }})
+    assert a["result"]["ok"] is True, f"audit should pass first: {a}"
+
+    # Adversary now commits an out-of-scope file AFTER the audit passed.
+    (tmp_path / "secret_exfil.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "secret_exfil.py")
+    _git(tmp_path, "commit", "-q", "-m", "sneak")
+
+    pe = _call(43, {"id": 43, "name": "post_evidence", "arguments": {
+        "task_gid": "TASK-TOCTOU", "summary": "closeout after tampering", "exit_code": 0,
+    }})
+    assert "error" in pe, f"expected TOCTOU rejection, got {pe}"
+    assert pe["error"]["code"] == -32009, pe
+    assert "re-run audit_scope" in pe["error"]["message"]
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None, "bound_cwd": None,
+                   "bound_task": None, "scope_audit_task": None,
+                   "scope_audit_cwd": None, "scope_audit_sig": None})
+

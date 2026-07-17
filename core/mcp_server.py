@@ -6,8 +6,10 @@ Transport: newline-delimited JSON (one JSON-RPC message per line), matching the
 proven-in-production pattern in scripts/npflight_mcp.py. Stdlib only.
 """
 import fnmatch
+import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -46,7 +48,7 @@ TOOLS = [
 ]
 
 # Explicit gate allowlist — unknown gates never execute as commands
-ALLOWED_GATES = frozenset({"ruff", "pytest", "quality"})
+ALLOWED_GATES = frozenset({"ruff", "pytest", "quality", "dod"})
 
 # ---------------------------------------------------------------------------
 # Session state
@@ -65,6 +67,8 @@ _state = {
     "scope_audit_ok": False,
     "scope_audit_task": None,
     "scope_audit_cwd": None,
+    "scope_audit_sig": None,
+    "contract_dod_cmd": None,
 }
 AUDIT_LOG = Path.home()/".npflight"/"audit.jsonl"
 
@@ -146,25 +150,47 @@ def _git_inventory(cwd: str) -> list:
 
     files = set()
 
+    # Resolve a committed diff base. Only a REMOTE ref is a trustworthy divergence
+    # point; a local main/master on a solo repo is often == HEAD (empty diff), so
+    # committed out-of-scope work would vanish. When no remote base resolves (or its
+    # merge-base fails), fall back to the repo root commit(s) and diff root..HEAD so
+    # EVERY committed change on the branch stays in the inventory (fail-closed superset).
     base_ref = None
-    for ref in ("origin/HEAD", "origin/main", "origin/master", "main", "master"):
+    for ref in ("origin/HEAD", "origin/main", "origin/master"):
         ok_r, _, _ = _git_run(["rev-parse", "--verify", ref], cwd)
         if ok_r:
             base_ref = ref
             break
+
+    committed_base = None
     if base_ref:
         ok_mb, mb_out, _ = _git_run(["merge-base", "HEAD", base_ref], cwd)
         mb = mb_out.strip() if ok_mb else ""
         if mb:
-            ok_d, diff_out, _ = _git_run(["diff", "--name-only", f"{mb}...HEAD"], cwd)
-            if not ok_d:
-                ok_d, diff_out, _ = _git_run(["diff", "--name-only", mb, "HEAD"], cwd)
-            if not ok_d:
-                raise RuntimeError("git merge-base committed diff failed")
-            for line in diff_out.splitlines():
-                n = _normalize_path(line)
-                if n:
-                    files.add(n)
+            committed_base = mb
+
+    def _add_committed_diff(base):
+        ok_d, diff_out, _ = _git_run(["diff", "--name-only", f"{base}...HEAD"], cwd)
+        if not ok_d:
+            ok_d, diff_out, _ = _git_run(["diff", "--name-only", base, "HEAD"], cwd)
+        if not ok_d:
+            raise RuntimeError("git committed diff failed")
+        for line in diff_out.splitlines():
+            n = _normalize_path(line)
+            if n:
+                files.add(n)
+
+    if committed_base is not None:
+        _add_committed_diff(committed_base)
+    else:
+        # No remote base_ref (or merge-base failed). Diff from root commit(s).
+        # A merged history can have >1 root — union each root..HEAD to stay a superset.
+        ok_root, root_out, _ = _git_run(["rev-list", "--max-parents=0", "HEAD"], cwd)
+        roots = [r.strip() for r in root_out.splitlines() if r.strip()] if ok_root else []
+        for root in roots:
+            _add_committed_diff(root)
+        # If no root resolves (repo has no commits / unborn HEAD), fall through to
+        # the working-tree union below — never crash.
 
     ok_s, staged, _ = _git_run(["diff", "--name-only", "--cached"], cwd)
     if not ok_s:
@@ -191,6 +217,12 @@ def _git_inventory(cwd: str) -> list:
             files.add(n)
 
     return sorted(files)
+
+def _inventory_sig(files) -> str:
+    """Stable signature of a trusted inventory. Input is already sorted+normalized
+    by _git_inventory, so ordering cannot cause a false mismatch."""
+    joined = "\n".join(files)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 def _gate_commands(gate_type, cwd, extra):
     """Resolve allowlisted gate to fixed argv list(s). Never shell; never use gate_type as cmd."""
@@ -222,7 +254,29 @@ def _verify_gate(gate_type,cwd,extra_args,trials):
     bound_cwd = _state.get("bound_cwd")
     if bound_cwd and cwd != os.path.realpath(bound_cwd):
         return {"gate_type":gate_type,"error":"cwd must match the preflight cwd","passed":False,"results":[]}
-    cmds = _gate_commands(gate_type, cwd, extra)
+    if gate_type == "dod":
+        # P2: run ONLY the DoD-cmd bound from the checked contract. Never a
+        # caller-supplied command; never fall back to quality. Fail closed.
+        dod = _state.get("contract_dod_cmd")
+        if not dod:
+            return {"gate_type":gate_type,"error":"No DoD-cmd bound from contract; cannot run 'dod' gate",
+                    "passed":False,"results":[]}
+        # Reject shell control metacharacters — argv is executed shell=False, this is
+        # defense-in-depth so a DoD-cmd can never be crafted to inject via a shell.
+        if any(ch in dod for ch in ";|&$`<>()\n\r\\"):
+            return {"gate_type":gate_type,"error":"DoD-cmd contains shell metacharacters; refused",
+                    "passed":False,"results":[]}
+        try:
+            argv = shlex.split(dod)
+        except ValueError as e:
+            return {"gate_type":gate_type,"error":f"DoD-cmd could not be parsed: {e}",
+                    "passed":False,"results":[]}
+        if not argv:
+            return {"gate_type":gate_type,"error":"DoD-cmd is empty after parsing",
+                    "passed":False,"results":[]}
+        cmds = [argv]
+    else:
+        cmds = _gate_commands(gate_type, cwd, extra)
     if not cmds:
         return {"gate_type":gate_type,"error":f"Gate '{gate_type}' has no resolvable command",
                 "passed":False,"results":[]}
@@ -320,7 +374,8 @@ def _call(rid,p):
         if n=="preflight":
             _state.update({"contract_ok": False, "last_verify_status": None,
                            "contract_scope_parsed": None, "scope_audit_ok": False,
-                           "scope_audit_task": None, "scope_audit_cwd": None})
+                           "scope_audit_task": None, "scope_audit_cwd": None,
+                           "scope_audit_sig": None, "contract_dod_cmd": None})
             r=_run_preflight(a.get("cwd"),a.get("task"),a.get("bootstrap"))
             _state["preflight_ok"]=r.get("status")=="clear" and r.get("exit_code")==0
             _state["last_preflight"]=r
@@ -339,8 +394,12 @@ def _call(rid,p):
             _state["scope_audit_ok"] = False
             _state["scope_audit_task"] = None
             _state["scope_audit_cwd"] = None
+            _state["scope_audit_sig"] = None
+            _state["contract_dod_cmd"] = None
             r=_check_contract(a.get("brief",""))
             _state["contract_ok"]=r["ok"]
+            # P2: bind optional DoD-cmd to session (opt-in verify target)
+            _state["contract_dod_cmd"] = r.get("dod_cmd") if r["ok"] else None
             # Parse scope from contract when it passes
             if r["ok"]:
                 for line in (a.get("brief","") or "").split("\n"):
@@ -395,9 +454,12 @@ def _call(rid,p):
             if r["ok"]:
                 _state["scope_audit_task"] = _state.get("bound_task")
                 _state["scope_audit_cwd"] = os.path.realpath(cwd)
+                # P1: snapshot the audited git state for TOCTOU re-check at closeout
+                _state["scope_audit_sig"] = _inventory_sig(git_files)
             else:
                 _state["scope_audit_task"] = None
                 _state["scope_audit_cwd"] = None
+                _state["scope_audit_sig"] = None
             _audit({"event":"audit_scope","ok":r["ok"],"git_files":git_files})
             return _rsp(rid,r)
         if n=="session_log":
@@ -419,6 +481,15 @@ def _call(rid,p):
             # P0-3: enforce task binding — reject cross-task evidence
             if _state["bound_task"] and a.get("task_gid") and a["task_gid"] != _state["bound_task"]:
                 return _err(rid,-32004,f"task_gid '{a['task_gid']}' does not match preflighted task '{_state['bound_task']}'")
+            # P1: TOCTOU — re-derive the trusted inventory for the bound cwd and
+            # compare against the snapshot taken at audit_scope. Any drift (new
+            # commit / staged / untracked change) invalidates the audit. Fail closed.
+            try:
+                current_files = _git_inventory(bound_cwd or os.getcwd())
+            except Exception as e:
+                return _err(rid,-32009,f"git state changed since scope audit; re-run audit_scope ({e})")
+            if _inventory_sig(current_files) != _state.get("scope_audit_sig"):
+                return _err(rid,-32009,"git state changed since scope audit; re-run audit_scope")
             resolution="Done" if a.get("exit_code",-1)==0 else "Blocked"
             # Local audit is UNCONDITIONAL and the source of truth.
             _audit({"event":"post_evidence","task_gid":a["task_gid"],"summary":a.get("summary"),

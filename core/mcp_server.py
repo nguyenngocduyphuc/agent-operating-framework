@@ -6,6 +6,7 @@ Transport: newline-delimited JSON (one JSON-RPC message per line), matching the
 proven-in-production pattern in scripts/npflight_mcp.py. Stdlib only.
 """
 import fnmatch
+import hashlib
 import json
 import os
 import shlex
@@ -66,6 +67,7 @@ _state = {
     "scope_audit_ok": False,
     "scope_audit_task": None,
     "scope_audit_cwd": None,
+    "scope_audit_sig": None,
     "contract_dod_cmd": None,
 }
 AUDIT_LOG = Path.home()/".npflight"/"audit.jsonl"
@@ -215,6 +217,12 @@ def _git_inventory(cwd: str) -> list:
             files.add(n)
 
     return sorted(files)
+
+def _inventory_sig(files) -> str:
+    """Stable signature of a trusted inventory. Input is already sorted+normalized
+    by _git_inventory, so ordering cannot cause a false mismatch."""
+    joined = "\n".join(files)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 def _gate_commands(gate_type, cwd, extra):
     """Resolve allowlisted gate to fixed argv list(s). Never shell; never use gate_type as cmd."""
@@ -367,7 +375,7 @@ def _call(rid,p):
             _state.update({"contract_ok": False, "last_verify_status": None,
                            "contract_scope_parsed": None, "scope_audit_ok": False,
                            "scope_audit_task": None, "scope_audit_cwd": None,
-                           "contract_dod_cmd": None})
+                           "scope_audit_sig": None, "contract_dod_cmd": None})
             r=_run_preflight(a.get("cwd"),a.get("task"),a.get("bootstrap"))
             _state["preflight_ok"]=r.get("status")=="clear" and r.get("exit_code")==0
             _state["last_preflight"]=r
@@ -386,6 +394,7 @@ def _call(rid,p):
             _state["scope_audit_ok"] = False
             _state["scope_audit_task"] = None
             _state["scope_audit_cwd"] = None
+            _state["scope_audit_sig"] = None
             _state["contract_dod_cmd"] = None
             r=_check_contract(a.get("brief",""))
             _state["contract_ok"]=r["ok"]
@@ -445,9 +454,12 @@ def _call(rid,p):
             if r["ok"]:
                 _state["scope_audit_task"] = _state.get("bound_task")
                 _state["scope_audit_cwd"] = os.path.realpath(cwd)
+                # P1: snapshot the audited git state for TOCTOU re-check at closeout
+                _state["scope_audit_sig"] = _inventory_sig(git_files)
             else:
                 _state["scope_audit_task"] = None
                 _state["scope_audit_cwd"] = None
+                _state["scope_audit_sig"] = None
             _audit({"event":"audit_scope","ok":r["ok"],"git_files":git_files})
             return _rsp(rid,r)
         if n=="session_log":
@@ -469,6 +481,15 @@ def _call(rid,p):
             # P0-3: enforce task binding — reject cross-task evidence
             if _state["bound_task"] and a.get("task_gid") and a["task_gid"] != _state["bound_task"]:
                 return _err(rid,-32004,f"task_gid '{a['task_gid']}' does not match preflighted task '{_state['bound_task']}'")
+            # P1: TOCTOU — re-derive the trusted inventory for the bound cwd and
+            # compare against the snapshot taken at audit_scope. Any drift (new
+            # commit / staged / untracked change) invalidates the audit. Fail closed.
+            try:
+                current_files = _git_inventory(bound_cwd or os.getcwd())
+            except Exception as e:
+                return _err(rid,-32009,f"git state changed since scope audit; re-run audit_scope ({e})")
+            if _inventory_sig(current_files) != _state.get("scope_audit_sig"):
+                return _err(rid,-32009,"git state changed since scope audit; re-run audit_scope")
             resolution="Done" if a.get("exit_code",-1)==0 else "Blocked"
             # Local audit is UNCONDITIONAL and the source of truth.
             _audit({"event":"post_evidence","task_gid":a["task_gid"],"summary":a.get("summary"),

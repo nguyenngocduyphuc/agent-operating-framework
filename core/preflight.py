@@ -16,6 +16,7 @@ Exit:   0 = clear . 2 = blocker
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -81,6 +82,59 @@ def load_policy(ws):
     return default
 
 
+def normalize_github_owner_repo(url):
+    """Return owner/repo from a GitHub remote URL, or None if unparseable."""
+    if not url or not isinstance(url, str):
+        return None
+    url = url.strip()
+    # SSH: git@github.com:owner/repo(.git)
+    m = re.match(r"^git@github\.com:([^/]+)/([^/]+?)(?:\.git)?/?$", url)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    # HTTPS (optional auth/www): https://[user@]github.com/owner/repo(.git)
+    m = re.match(
+        r"^https?://(?:[^/@]+@)?(?:www\.)?github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$",
+        url,
+    )
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    # ssh://git@github.com/owner/repo(.git)
+    m = re.match(r"^ssh://git@github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$", url)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    return None
+
+
+def check_expected_repository(repo, expected):
+    """If expected is set, verify origin remote matches owner/repo. Return blocker or None."""
+    if not expected or not isinstance(expected, str) or not expected.strip():
+        return None
+    expected = expected.strip()
+    if not repo:
+        return (
+            f"expected_repository is '{expected}' but no git repo was found. "
+            "cd into the canonical checkout."
+        )
+    origin = sh(["git", "-C", repo, "remote", "get-url", "origin"])
+    if not origin:
+        return (
+            f"expected_repository is '{expected}' but origin remote is missing or empty. "
+            "Set origin to the canonical GitHub repository."
+        )
+    actual = normalize_github_owner_repo(origin)
+    if not actual:
+        return (
+            f"expected_repository is '{expected}' but origin URL is unparseable as "
+            f"GitHub owner/repo: {origin!r}"
+        )
+    if actual != expected:
+        return (
+            f"origin repository '{actual}' does not match expected_repository '{expected}'. "
+            "Use a checkout of the canonical repository."
+        )
+    return None
+
+
 def dotenv_keys(ws):
     env_path = os.path.join(ws, ".env")
     keys = set()
@@ -138,6 +192,11 @@ def main():
             blockers.append(f"Branch '{branch}' is for a different task than {args.task}. Create the correct branch and retry.")
         if dirty and branch in ("main", "master"):
             warns.append("Uncommitted changes on a shared branch.")
+
+    expected = policy.get("expected_repository")
+    identity_blocker = check_expected_repository(repo, expected)
+    if identity_blocker:
+        blockers.append(identity_blocker)
 
     rules_path = os.path.join(ws, "OPERATING_PROTOCOL.md")
     if not os.path.exists(rules_path):

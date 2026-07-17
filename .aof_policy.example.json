@@ -5,6 +5,7 @@
   "require_evidence": true,
   "require_handoff": true,
   "allow_bootstrap_without_task": true,
+  "expected_repository": "",
   "credential_groups": {
     "TaskTracker": ["TRACKER_TOKEN"],
     "GitHub": ["GITHUB_TOKEN"]

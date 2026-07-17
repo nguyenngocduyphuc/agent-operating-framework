@@ -525,3 +525,46 @@ def test_full_mcp_sequence_passes(tmp_path):
 
     # Cleanup
     _state.clear()
+
+# ===================================================================
+# 10. P2 — DoD-cmd is bound from the contract and never caller-controlled
+# ===================================================================
+
+def test_dod_cmd_runs_stored_command_only(tmp_path):
+    """gate_type='dod' runs ONLY the contract-bound DoD-cmd (a failing check here),
+    never a caller-supplied command, and never falls back to quality."""
+    from core.mcp_server import _state, _verify_gate
+
+    failing = tmp_path / "failing_check.py"
+    failing.write_text("import sys\nsys.exit(1)\n")
+
+    _state["bound_workspace"] = str(tmp_path)
+    _state["bound_cwd"] = os.path.realpath(str(tmp_path))
+    _state["contract_dod_cmd"] = f"{sys.executable} {failing}"
+
+    r = _verify_gate("dod", str(tmp_path), ["--attacker-supplied"], 1)
+    assert "error" not in r, f"dod gate must execute, not error: {r.get('error')}"
+    assert r["passed"] is False, "a failing DoD-cmd must yield passed=False"
+    ran = " ".join(str(x) for x in r["results"][0]["steps"][0]["cmd"])
+    assert str(failing) in ran, "the stored DoD-cmd must be the command executed"
+    assert "--attacker-supplied" not in ran, "caller args must not reach the command"
+
+    _state["bound_workspace"] = None
+    _state["bound_cwd"] = None
+    _state["contract_dod_cmd"] = None
+
+
+def test_contract_without_dodcmd_still_valid():
+    """A standard 7-field contract with NO DoD-cmd stays valid and closes through
+    the unchanged quality/pytest path (opt-in DoD is backward compatible)."""
+    from core.mcp_server import _gate_commands
+
+    r = check_contract.validate(GOOD_CONTRACT)
+    assert r["ok"], "7-field contract must pass"
+    assert "dod_cmd" in r, "return dict must expose dod_cmd (backward-compatible field)"
+    assert r["dod_cmd"] is None, "no DoD-cmd line -> None"
+
+    cmds = _gate_commands("quality", str(REPO), [])
+    assert cmds, "quality gate must still resolve without a DoD-cmd"
+    flat = " ".join(" ".join(c) for c in cmds)
+    assert "ruff" in flat or "pytest" in flat, "quality path unchanged"

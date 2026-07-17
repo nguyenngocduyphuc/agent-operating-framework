@@ -568,3 +568,54 @@ def test_contract_without_dodcmd_still_valid():
     assert cmds, "quality gate must still resolve without a DoD-cmd"
     flat = " ".join(" ".join(c) for c in cmds)
     assert "ruff" in flat or "pytest" in flat, "quality path unchanged"
+
+# ===================================================================
+# 9. P0 — committed out-of-scope files without origin must be caught
+# ===================================================================
+
+def _git(cwd, *args):
+    subprocess.run(
+        ["git", "-C", str(cwd), "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        check=True, capture_output=True,
+    )
+
+
+def test_committed_out_of_scope_caught_without_origin(tmp_path):
+    """A repo with NO origin: a file committed on the branch outside scope must
+    still appear in the trusted inventory and be flagged out-of-scope."""
+    from core.mcp_server import _call, _state
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    # commit 1 = base/root commit (unrelated file)
+    (tmp_path / "README.md").write_text("# base\n")
+    _git(tmp_path, "add", "README.md")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    # commit 2 = branch work: in-scope + out-of-scope, all COMMITTED, no remote
+    (tmp_path / "src" / "api").mkdir(parents=True)
+    (tmp_path / "src" / "api" / "health.py").write_text("ok = True\n")
+    (tmp_path / "secret_exfil.py").write_text("x = 1\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "work")
+
+    _state.update({
+        "preflight_ok": True, "contract_ok": True, "last_verify_status": "passed",
+        "scope_audit_ok": False, "contract_scope_parsed": ["src/api/health.py"],
+        "bound_cwd": str(tmp_path), "bound_task": "TASK-P0",
+        "scope_audit_task": None, "scope_audit_cwd": None, "scope_audit_sig": None,
+    })
+    r = _call(40, {"id": 40, "name": "audit_scope", "arguments": {
+        "scope": ["src/api/health.py"],
+        "changed_files": ["src/api/health.py"],  # adversary hides the committed file
+    }})
+    assert "result" in r, r
+    assert r["result"]["ok"] is False, "committed out-of-scope file must be flagged"
+    assert "secret_exfil.py" in r["result"]["out_of_scope"]
+    assert "secret_exfil.py" in r["result"]["git_files"]
+
+    _state.update({"preflight_ok": False, "contract_ok": False,
+                   "last_verify_status": None, "scope_audit_ok": False,
+                   "contract_scope_parsed": None, "bound_cwd": None,
+                   "bound_task": None, "scope_audit_task": None,
+                   "scope_audit_cwd": None, "scope_audit_sig": None})
+
+

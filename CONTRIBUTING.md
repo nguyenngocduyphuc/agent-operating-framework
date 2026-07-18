@@ -32,16 +32,5 @@
 | Log | `logs/` |
 | Batch/.cmd | `scripts/` or project-specific `bin/` |
 
-## 🏠 Project Structure
-
-| # | Project | Priority | Status |
-|---|---------|----------|--------|
-| 8 | `***redacted***/` | 🔴 Core | ✅ Clean |
-| 6 | `***redacted***/` | 🔴 Core | ✅ Clean |
-| 3 | `***redacted***/` | ⚠️ Active | Has rules |
-| 4 | `***redacted***/` | ⚠️ Active | Has rules |
-| 5 | `***redacted***/` | ℹ️ Side | Clean |
-| 2 | `***redacted***/` | ⛔ DEPRECATED | Do not use |
-
 ---
 *Updated: 2026-03-19 — Post-cleanup enforcement*

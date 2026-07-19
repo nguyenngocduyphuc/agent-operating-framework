@@ -29,7 +29,7 @@ Idempotent -- safe to re-run. The tool stays in your PATH; the project keeps onl
 - **MCP server** -- stdio JSON-RPC server for agent-host integration (Claude Code, Cline, Cursor, etc.). Exposes `preflight`, `check_contract`, `verify_gate`, `audit_scope`, `session_log`, and `post_evidence` tools.
 - **Scope audit** -- compares changed files against the active contract scope before claiming done. Catches side-quests automatically.
 - **Verify gate** -- runs quality checks (ruff, pytest, custom gates) with optional multi-trial statistical pass for flaky tests.
-- **Evidence log** -- structured audit trail to `~/.npflight/audit.jsonl`. Every action is logged: decisions, gates, blockers, outcomes.
+- **Evidence log** -- structured audit trail to `~/.aof/audit.jsonl`. Every action is logged: decisions, gates, blockers, outcomes.
 
 ## No-code pilot (beta)
 
@@ -72,7 +72,7 @@ When you paste either prompt, your agent:
 1. Calls `preflight` to verify workspace, repo, and credentials.
 2. Creates an **execution contract** from your goal — a scope-lock with Task, Owner, DoD, and Stop-if.
 3. Reports back its internal state: **Planning**, **Needs approval**, **Blocked**, or **Done**.
-4. On completion, writes structured evidence to `~/.npflight/audit.jsonl`.
+4. On completion, writes structured evidence to `~/.aof/audit.jsonl`.
 
 Exit codes (0 = success, 2 = blocker) and MCP calls are handled internally.
 You only see the state label and a plain-language summary.

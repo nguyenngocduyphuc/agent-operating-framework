@@ -36,6 +36,19 @@ PROSE_ONLY_CONTRACT = (
 )
 
 
+def payload(resp):
+    """Decode an MCP tool-result envelope: result.content[0].text holds the JSON."""
+    result = resp["result"]
+    assert "content" in result, f"not an MCP tool-result envelope: {result}"
+    assert result["content"][0]["type"] == "text"
+    return json.loads(result["content"][0]["text"])
+
+
+def is_error(resp):
+    """True when the tool refused. Refusals are isError results, not JSON-RPC errors."""
+    return bool(resp["result"].get("isError"))
+
+
 # ===================================================================
 # 1. Invalid policy → fail closed (exit 2, not silent exit 0)
 # ===================================================================
@@ -228,14 +241,14 @@ def test_scope_mismatch_blocked():
     contract = _call(20, {"id": 20, "name": "check_contract", "arguments": {
         "brief": GOOD_CONTRACT,
     }})
-    assert contract["result"]["ok"]
+    assert payload(contract)["ok"]
 
     result = _call(21, {"id": 21, "name": "audit_scope", "arguments": {
         "scope": ["**"],
         "changed_files": ["out-of-scope/secrets.py"],
     }})
-    assert "error" in result, "caller must not widen contract scope"
-    assert result["error"]["code"] == -32006
+    assert is_error(result), "caller must not widen contract scope"
+    assert payload(result)["error_code"] == -32006
 
     _state.update({"preflight_ok": False, "contract_ok": False,
                    "last_verify_status": None, "scope_audit_ok": False,
@@ -267,9 +280,9 @@ def test_caller_changed_files_cannot_hide_out_of_scope_git(tmp_path):
         "changed_files": ["src/api/health.py"],
     }})
     assert "result" in result, f"expected result, got {result}"
-    assert result["result"]["ok"] is False
-    assert "evil_out_of_scope.py" in result["result"]["out_of_scope"]
-    assert result["result"].get("caller_changed_files_ignored") is True
+    assert payload(result)["ok"] is False
+    assert "evil_out_of_scope.py" in payload(result)["out_of_scope"]
+    assert payload(result).get("caller_changed_files_ignored") is True
     assert _state["scope_audit_ok"] is False
 
     # Honest git inventory with only in-scope file may pass
@@ -278,7 +291,7 @@ def test_caller_changed_files_cannot_hide_out_of_scope_git(tmp_path):
             "scope": ["src/api/health.py"],
             "changed_files": ["forged-only.py"],  # ignored
         }})
-    assert result2["result"]["ok"] is True
+    assert payload(result2)["ok"] is True
     assert _state["scope_audit_ok"] is True
     assert _state["scope_audit_task"] == "TASK-SCOPE"
 
@@ -314,7 +327,7 @@ def test_new_preflight_resets_prior_gate_state(monkeypatch):
     result = mcp._call(22, {"id": 22, "name": "preflight", "arguments": {
         "cwd": "/tmp/aof", "task": "TASK-B",
     }})
-    assert result["result"]["status"] == "clear"
+    assert payload(result)["status"] == "clear"
     assert not mcp._state["contract_ok"]
     assert mcp._state["last_verify_status"] is None
     assert not mcp._state["scope_audit_ok"]
@@ -346,10 +359,10 @@ def test_cross_task_evidence_blocked():
         "exit_code": 0,
     }}
     r = _call(10, req)
-    assert "error" in r, "expected error for cross-task evidence"
-    assert r["error"]["code"] == -32004, f"expected error code -32004, got {r['error']['code']}"
-    assert "TASK-A" in r["error"]["message"], "error must mention bound task"
-    assert "TASK-B" in r["error"]["message"], "error must mention submitted task"
+    assert is_error(r), "expected error for cross-task evidence"
+    assert payload(r)["error_code"] == -32004, f"expected error code -32004, got {payload(r)}"
+    assert "TASK-A" in payload(r)["error"], "error must mention bound task"
+    assert "TASK-B" in payload(r)["error"], "error must mention submitted task"
 
     # Cleanup
     _state["preflight_ok"] = False
@@ -376,8 +389,8 @@ def test_post_evidence_requires_bound_scope_audit():
     r = _call(13, {"id": 13, "name": "post_evidence", "arguments": {
         "task_gid": "TASK-X", "summary": "stale scope", "exit_code": 0,
     }})
-    assert "error" in r
-    assert r["error"]["code"] == -32003
+    assert is_error(r)
+    assert payload(r)["error_code"] == -32003
 
     _state.update({
         "scope_audit_task": "TASK-X",
@@ -386,8 +399,8 @@ def test_post_evidence_requires_bound_scope_audit():
     r2 = _call(14, {"id": 14, "name": "post_evidence", "arguments": {
         "task_gid": "TASK-X", "summary": "wrong cwd", "exit_code": 0,
     }})
-    assert "error" in r2
-    assert r2["error"]["code"] == -32003
+    assert is_error(r2)
+    assert payload(r2)["error_code"] == -32003
 
     _state.update({
         "preflight_ok": False, "contract_ok": False,
@@ -414,10 +427,9 @@ def test_evidence_needs_verify():
         "task_gid": "TASK-X", "summary": "no verify", "exit_code": 0,
     }}
     r = _call(11, req)
-    assert "error" in r, "expected error when verify not passed"
-    assert -32002 in (r["error"]["code"], r.get("error", {}).get("code", 0)), (
-        "expected verify gate error code"
-    )
+    assert is_error(r), "expected error when verify not passed"
+    assert payload(r)["error_code"] == -32002, "expected verify gate error code"
+    assert payload(r)["fix"], "refusal must tell the agent what to do next"
 
     _state["preflight_ok"] = False
     _state["contract_ok"] = False
@@ -438,10 +450,9 @@ def test_evidence_needs_scope_audit():
         "task_gid": "TASK-X", "summary": "no scope audit", "exit_code": 0,
     }}
     r = _call(12, req)
-    assert "error" in r, "expected error when scope audit not passed"
-    assert -32003 in (r["error"]["code"], r.get("error", {}).get("code", 0)), (
-        "expected scope audit error code"
-    )
+    assert is_error(r), "expected error when scope audit not passed"
+    assert payload(r)["error_code"] == -32003, "expected scope audit error code"
+    assert payload(r)["fix"], "refusal must tell the agent what to do next"
 
     _state["preflight_ok"] = False
     _state["contract_ok"] = False
@@ -489,14 +500,14 @@ def test_full_mcp_sequence_passes(tmp_path):
     # check_contract
     cc_req = {"id": 2, "name": "check_contract", "arguments": {"brief": GOOD_CONTRACT}}
     cc_r = _call(2, cc_req)
-    assert cc_r["result"]["ok"], f"contract failed: {cc_r}"
+    assert payload(cc_r)["ok"], f"contract failed: {cc_r}"
 
     # verify_gate (quality = ruff, and pytest only when not already under pytest)
     with mock.patch("core.mcp_server.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         vg_req = {"id": 3, "name": "verify_gate", "arguments": {"gate_type": "quality", "cwd": bound}}
         vg_r = _call(3, vg_req)
-    assert vg_r["result"].get("passed", False), f"verify gate failed: {vg_r}"
+    assert payload(vg_r).get("passed", False), f"verify gate failed: {vg_r}"
     # Must not invoke compileall
     for call in run.call_args_list:
         cmd = call.args[0] if call.args else call.kwargs.get("args")
@@ -508,8 +519,8 @@ def test_full_mcp_sequence_passes(tmp_path):
         "changed_files": [],  # ignored; must not be required as evidence
     }}
     as_r = _call(4, as_req)
-    assert as_r["result"]["ok"], f"scope audit failed: {as_r}"
-    assert "src/api/health.py" in as_r["result"]["git_files"]
+    assert payload(as_r)["ok"], f"scope audit failed: {as_r}"
+    assert "src/api/health.py" in payload(as_r)["git_files"]
     assert _state["scope_audit_task"] == "TASK-123"
     assert _state["scope_audit_cwd"] == bound
 
@@ -520,8 +531,8 @@ def test_full_mcp_sequence_passes(tmp_path):
         "exit_code": 0,
     }}
     pe_r = _call(5, pe_req)
-    assert pe_r["result"]["ok"], f"post_evidence failed: {pe_r}"
-    assert pe_r["result"]["resolution"] == "Done"
+    assert payload(pe_r)["ok"], f"post_evidence failed: {pe_r}"
+    assert payload(pe_r)["resolution"] == "Done"
 
     # Cleanup
     _state.clear()
@@ -608,9 +619,9 @@ def test_committed_out_of_scope_caught_without_origin(tmp_path):
         "changed_files": ["src/api/health.py"],  # adversary hides the committed file
     }})
     assert "result" in r, r
-    assert r["result"]["ok"] is False, "committed out-of-scope file must be flagged"
-    assert "secret_exfil.py" in r["result"]["out_of_scope"]
-    assert "secret_exfil.py" in r["result"]["git_files"]
+    assert payload(r)["ok"] is False, "committed out-of-scope file must be flagged"
+    assert "secret_exfil.py" in payload(r)["out_of_scope"]
+    assert "secret_exfil.py" in payload(r)["git_files"]
 
     _state.update({"preflight_ok": False, "contract_ok": False,
                    "last_verify_status": None, "scope_audit_ok": False,
@@ -638,8 +649,8 @@ def test_empty_repo_still_uses_working_union(tmp_path):
         "scope": ["src/feature.py"], "changed_files": [],
     }})
     assert "result" in r, r
-    assert r["result"]["ok"] is True, "in-scope untracked file must pass on empty repo"
-    assert "src/feature.py" in r["result"]["git_files"]
+    assert payload(r)["ok"] is True, "in-scope untracked file must pass on empty repo"
+    assert "src/feature.py" in payload(r)["git_files"]
     assert _state["scope_audit_sig"] is not None, "audit must snapshot a signature"
 
     _state.update({"preflight_ok": False, "contract_ok": False,
@@ -671,7 +682,7 @@ def test_toctou_post_evidence_rejects_changed_git(tmp_path):
     a = _call(42, {"id": 42, "name": "audit_scope", "arguments": {
         "scope": ["src/api/health.py"], "changed_files": [],
     }})
-    assert a["result"]["ok"] is True, f"audit should pass first: {a}"
+    assert payload(a)["ok"] is True, f"audit should pass first: {a}"
 
     # Adversary now commits an out-of-scope file AFTER the audit passed.
     (tmp_path / "secret_exfil.py").write_text("x = 1\n")
@@ -681,9 +692,9 @@ def test_toctou_post_evidence_rejects_changed_git(tmp_path):
     pe = _call(43, {"id": 43, "name": "post_evidence", "arguments": {
         "task_gid": "TASK-TOCTOU", "summary": "closeout after tampering", "exit_code": 0,
     }})
-    assert "error" in pe, f"expected TOCTOU rejection, got {pe}"
-    assert pe["error"]["code"] == -32009, pe
-    assert "re-run audit_scope" in pe["error"]["message"]
+    assert is_error(pe), f"expected TOCTOU rejection, got {pe}"
+    assert payload(pe)["error_code"] == -32009, pe
+    assert "re-run audit_scope" in payload(pe)["error"]
 
     _state.update({"preflight_ok": False, "contract_ok": False,
                    "last_verify_status": None, "scope_audit_ok": False,

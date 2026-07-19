@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-operating-framework"
+version = "0.2.0b1"
+description = "Portable preflight gate and execution contract enforcement for AI-agent workspaces."
+requires-python = ">=3.10"
+license = {text = "MIT"}
+readme = "README.md"
+keywords = ["ai", "agents", "preflight", "mcp", "execution-contract"]
+# ponytail: zero mandatory deps -- certifi is a lazy-optional fallback in mcp_server and asana_adapter
+dependencies = []
+
+[project.scripts]
+aof = "core.cli:main"
+
+[tool.setuptools]
+packages = ["core", "adapters"]
+
+[tool.setuptools.package-data]
+"core" = ["*.md"]
+"adapters" = ["*.md"]

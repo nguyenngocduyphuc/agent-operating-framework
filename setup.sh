@@ -1,12 +1,22 @@
 #!/bin/sh
-# setup.sh — AOF zero-dependency workspace setup
-#   bash setup.sh [--yes] [target-dir]          — from cloned repo
-#   curl -fsSL <raw-url> | bash -s -- [--yes] <target-dir>  — pipe mode
+# setup.sh -- AOF workspace config setup (config-only; code is installed separately).
 #
-# Single command → everything ready. POSIX sh, only needs git + python3.
+# INSTALL FIRST:
+#   uv tool install agent-operating-framework   # from PyPI (once published)
+#   uv tool install .                           # from this clone
+#   pip install .                               # fallback
+#
+# THEN run:
+#   bash setup.sh [--yes] [target-dir]
+#
+# What this script does (Serena pattern: code lives in the tool, not the project):
+#   1. Checks that the 'aof' command is installed.
+#   2. Creates .aof_policy.json in the target (configuration, not code).
+#   3. Creates the .agentframework workspace marker.
+#   4. Prints MCP registration using the installed 'aof' command.
+#
+# POSIX sh, no dependencies beyond python3 and the installed 'aof' tool.
 set -u
-
-REPO_URL="https://github.com/nguyenngocduyphuc/agent-operating-framework.git"
 
 # --- Parse args ---
 YES=0
@@ -19,120 +29,88 @@ for arg in "$@"; do
 done
 
 # ---------------------------------------------------------------------------
-# 1. Locate source (clone if running via curl pipe)
+# 1. Require the 'aof' command -- fail fast and clearly
 # ---------------------------------------------------------------------------
-SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-TMP_REPO=""
-if [ ! -f "$SCRIPT_DIR/core/preflight.py" ]; then
-    echo "[setup] cloning AOF repository ..."
-    TMP_REPO="$(mktemp -d /tmp/aof-setup-XXXXXX 2>/dev/null || mktemp -d /tmp/aof-setup-XXXXXXXX)"
-    git clone -q --depth 1 "$REPO_URL" "$TMP_REPO" || {
-        echo "NEEDS ATTENTION: git clone failed. Ensure git is installed and the URL is reachable:"
-        echo "  $REPO_URL" >&2
-        rm -rf "$TMP_REPO"
-        exit 1
-    }
-    SCRIPT_DIR="$TMP_REPO"
+if ! command -v aof >/dev/null 2>&1; then
+    echo "NEEDS ATTENTION: 'aof' command not found."
+    echo ""
+    echo "Install it first:"
+    echo "  uv tool install .                            # from this clone"
+    echo "  uv tool install agent-operating-framework   # from PyPI"
+    echo "  pip install .                                # pip fallback"
+    echo ""
+    echo "Then re-run this script."
+    exit 1
 fi
+
+AOF_VERSION="$(aof --version 2>&1 || true)"
+echo "[setup] Found: $AOF_VERSION"
 
 # ---------------------------------------------------------------------------
 # 2. Determine TARGET
 # ---------------------------------------------------------------------------
 if [ -z "$TARGET" ]; then
     TARGET="$(pwd)"
-    # Refuse to use the kernel repo as its own target
-    if [ -f "$TARGET/core/preflight.py" ]; then
-        echo "NEEDS ATTENTION: specify a target directory (running from AOF repo itself)."
-        echo "  bash setup.sh /path/to/your-project/" >&2
-        [ -n "$TMP_REPO" ] && rm -rf "$TMP_REPO"
-        exit 1
-    fi
 fi
 
 mkdir -p "$TARGET"
 TARGET="$(cd "$TARGET" && pwd)"
 
-# Pre-flight checks
-command -v python3 >/dev/null 2>&1 || {
-    echo "NEEDS ATTENTION: python3 not found. Install Python 3.10+ and ensure it is on PATH." >&2
-    [ -n "$TMP_REPO" ] && rm -rf "$TMP_REPO"
-    exit 1
-}
-
 # ---------------------------------------------------------------------------
-# 3. Copy runtime files
+# 3. Create .aof_policy.json from embedded template (config only -- no code copy)
 # ---------------------------------------------------------------------------
-mkdir -p "$TARGET/core"
-cp -R "$SCRIPT_DIR/core/." "$TARGET/core/"
-cp "$SCRIPT_DIR/.aof_policy.example.json" "$TARGET/"
-
 if [ -f "$TARGET/.aof_policy.json" ]; then
     echo "[setup] kept existing .aof_policy.json"
 else
-    cp "$SCRIPT_DIR/.aof_policy.example.json" "$TARGET/.aof_policy.json"
+    # ponytail: embed the template inline so no clone is required
+    cat > "$TARGET/.aof_policy.json" << 'JSON'
+{
+  "workspace_name": "my-project",
+  "require_task": false,
+  "require_contract": true,
+  "require_evidence": true,
+  "require_handoff": true,
+  "allow_bootstrap_without_task": true,
+  "expected_repository": "",
+  "credential_groups": {
+    "TaskTracker": ["TRACKER_TOKEN"],
+    "GitHub": ["GITHUB_TOKEN"]
+  }
+}
+JSON
+    echo "[setup] created .aof_policy.json (edit workspace_name and flags)"
 fi
 
 touch "$TARGET/.agentframework"
-
-if [ -d "$SCRIPT_DIR/adapters" ]; then
-    mkdir -p "$TARGET/adapters"
-    cp -R "$SCRIPT_DIR/adapters/." "$TARGET/adapters/"
-fi
+echo "[setup] .agentframework marker ready"
 
 # ---------------------------------------------------------------------------
-# 4. Git init (if target not yet a repo)
-# ---------------------------------------------------------------------------
-if [ ! -d "$TARGET/.git" ]; then
-    (cd "$TARGET" && git init -q)
-    USER_NAME="$(git config user.name 2>/dev/null || true)"
-    USER_EMAIL="$(git config user.email 2>/dev/null || true)"
-    if [ -z "$USER_NAME" ] || [ -z "$USER_EMAIL" ]; then
-        (cd "$TARGET" && git -c user.name="AOF Setup" -c user.email="setup@aof.local" commit -q --allow-empty -m "aof init") 2>/dev/null || true
-    else
-        (cd "$TARGET" && git commit -q --allow-empty -m "aof init") 2>/dev/null || true
-    fi
-fi
-
-# ---------------------------------------------------------------------------
-# 5. Smoke test
-# ---------------------------------------------------------------------------
-SMOKE_OUTPUT="$(cd "$TARGET" && python3 -m core.preflight --json 2>&1 || true)"
-SMOKE_STATUS="$(echo "$SMOKE_OUTPUT" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    print(d.get('status', 'error'))
-except Exception:
-    print('error')
-" 2>/dev/null || echo "error")"
-
-# ---------------------------------------------------------------------------
-# 6. MCP registration hint
+# 4. MCP registration -- point to the installed 'aof' command, not a local file
 # ---------------------------------------------------------------------------
 if command -v claude >/dev/null 2>&1; then
     echo "[setup] MCP register command:"
-    echo "  claude mcp add aof -- python3 -m core.mcp_server"
+    echo "  claude mcp add aof -- aof start-mcp-server"
     if [ "$YES" = "0" ]; then
         printf "[setup] Run now? [Y/n] "
         read -r REPLY
         case "$REPLY" in
             n|N|no) echo "[setup] skipped MCP registration." ;;
             *)
-                (cd "$TARGET" && eval "claude mcp add aof -- python3 -m core.mcp_server") 2>&1 || \
-                    echo "[setup] MCP registration command failed (run manually)."
+                claude mcp add aof -- aof start-mcp-server 2>&1 || \
+                    echo "[setup] MCP registration failed (run manually)."
                 ;;
         esac
     else
-        echo "[setup] Non-interactive mode — run manually:"
-        echo "  claude mcp add aof -- python3 -m core.mcp_server"
+        echo "[setup] Non-interactive mode -- run manually:"
+        echo "  claude mcp add aof -- aof start-mcp-server"
     fi
 else
     echo "[setup] MCP: add this block to your agent host's MCP config:"
     echo '  {'
     echo '    "mcpServers": {'
     echo '      "aof": {'
-    echo '        "command": "python3",'
-    echo '        "args": ["-m", "core.mcp_server"],'
+    echo '        "command": "aof",'
+    echo '        "args": ["start-mcp-server"],'
     echo '        "env": {}'
     echo '      }'
     echo '    }'
@@ -140,17 +118,13 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Final status
+# 5. Done
 # ---------------------------------------------------------------------------
-case "$SMOKE_STATUS" in
-    clear|warn)
-        echo "AOF READY — preflight $SMOKE_STATUS"
-        [ -n "$TMP_REPO" ] && rm -rf "$TMP_REPO"
-        exit 0
-        ;;
-    *)
-        echo "NEEDS ATTENTION: preflight reports '$SMOKE_STATUS'. Run 'python3 -m core.preflight' in $TARGET for details." >&2
-        [ -n "$TMP_REPO" ] && rm -rf "$TMP_REPO"
-        exit 1
-        ;;
-esac
+echo ""
+echo "AOF READY"
+echo "  workspace: $TARGET"
+echo "  tool:      $AOF_VERSION"
+echo "  policy:    $TARGET/.aof_policy.json"
+echo ""
+echo "Next: edit .aof_policy.json, then register the MCP server with your agent host."
+exit 0

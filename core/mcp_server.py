@@ -2,8 +2,12 @@
 """AOF MCP Server — stdio JSON-RPC 2.0 server for AOF framework tools.
 
 No private paths, no project IDs, no secrets. Credentials checked for PRESENCE only.
-Transport: newline-delimited JSON (one JSON-RPC message per line), matching the
-proven-in-production pattern in scripts/npflight_mcp.py. Stdlib only.
+Transport: newline-delimited JSON (one JSON-RPC message per line). Stdlib only.
+
+Preconditions are enforced at the JSON-RPC error layer and are ALWAYS ON: a tool
+that needs preflight/contract/verify/scope returns a protocol error rather than a
+success payload carrying a false flag, so a naive client cannot mistake a refusal
+for a result.
 """
 import fnmatch
 import hashlib
@@ -17,6 +21,17 @@ import uuid
 from pathlib import Path
 
 from core.check_contract import validate as validate_contract
+from core.enforcement import (
+    audit_file,
+    ensure_audit_dir,
+    with_stall_warning,
+    write_decision,
+)
+
+# Gate timeout bounds. A caller may raise the per-command timeout for slow suites,
+# but never past the ceiling -- an unbounded gate is a hung server.
+DEFAULT_GATE_TIMEOUT_S = 120
+MAX_GATE_TIMEOUT_S = 1800
 
 # ---------------------------------------------------------------------------
 # TOOLS catalog
@@ -32,14 +47,17 @@ TOOLS = [
     {"name":"verify_gate","description":"Run quality gate (ruff|pytest|quality) with optional multi-trial","inputSchema":{"type":"object","properties":{
         "gate_type":{"type":"string"},"cwd":{"type":"string"},
         "extra_args":{"type":"array","items":{"type":"string"}},
-        "trials":{"type":"integer","minimum":1,"maximum":10}}},
-     "required":["gate_type"]},
+        "timeout_s":{"type":"integer","minimum":1,"maximum":MAX_GATE_TIMEOUT_S,
+                     "description":f"per-command timeout in seconds (default {DEFAULT_GATE_TIMEOUT_S}, max {MAX_GATE_TIMEOUT_S})"},
+        "trials":{"type":"integer","minimum":1,"maximum":10}},
+     "required":["gate_type"]}},
     {"name":"audit_scope","description":"Check git-derived changed paths against contract scope globs","inputSchema":{"type":"object","properties":{
-        "scope":{"type":"array","items":{"type":"string"}},
+        "scope":{"type":"array","items":{"type":"string"},
+                 "description":"glob patterns; a comma/newline separated string is also accepted"},
         "changed_files":{"type":"array","items":{"type":"string"}}},"required":["scope"]}},
-    {"name":"session_log","description":"Append event to ~/.npflight/audit.jsonl","inputSchema":{"type":"object","properties":{
+    {"name":"session_log","description":"Append a named event to the audit log","inputSchema":{"type":"object","properties":{
         "event":{"type":"string","description":"goal|decision|dead-end|file|question"},
-        "data":{"type":"object"}},"required":["event","data"]}},
+        "data":{"type":"object"}},"required":["event"]}},
     {"name":"post_evidence","description":"Post closeout evidence (adapter provides tracker token)","inputSchema":{"type":"object","properties":{
         "task_gid":{"type":"string"},"summary":{"type":"string"},
         "exit_code":{"type":"integer"},"artifacts":{"type":"array","items":{"type":"string"}},
@@ -70,17 +88,15 @@ _state = {
     "scope_audit_sig": None,
     "contract_dod_cmd": None,
 }
-AUDIT_LOG = Path.home()/".npflight"/"audit.jsonl"
-
 def _ensure_audit():
-    Path.home().joinpath(".npflight").mkdir(parents=True, exist_ok=True)
+    ensure_audit_dir()
 
 def _audit(entry):
     _ensure_audit()
     entry["_session"] = SESSION_ID
     entry["_ts"] = time.time()
     try:
-        with open(AUDIT_LOG, "a", encoding="utf-8") as f:
+        with open(audit_file(), "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError:
         pass
@@ -241,12 +257,21 @@ def _gate_commands(gate_type, cwd, extra):
         return cmds
     return None
 
-def _verify_gate(gate_type,cwd,extra_args,trials):
+def _resolve_timeout(timeout_s):
+    """Clamp a caller timeout into [1, MAX_GATE_TIMEOUT_S]; non-numeric falls back to default."""
+    try:
+        t = int(timeout_s)
+    except (TypeError, ValueError):
+        return DEFAULT_GATE_TIMEOUT_S
+    return max(1, min(t, MAX_GATE_TIMEOUT_S))
+
+def _verify_gate(gate_type,cwd,extra_args,trials,timeout_s=None):
     # P0: restrict gate names, cwd, and trials — unknown never executes
     if gate_type not in ALLOWED_GATES:
         return {"gate_type":gate_type,"error":f"Gate '{gate_type}' not allowed. Use one of: {', '.join(sorted(ALLOWED_GATES))}",
                 "passed":False,"results":[]}
     cwd=os.path.realpath(cwd or os.getcwd()); extra=extra_args or []; trials=min(trials or 1, 10)
+    timeout=_resolve_timeout(timeout_s)
     # cwd must be under the preflight workspace
     ws = _state.get("bound_workspace")
     if ws and os.path.commonpath([os.path.realpath(ws)]) != os.path.commonpath([os.path.realpath(ws), cwd]):
@@ -286,7 +311,7 @@ def _verify_gate(gate_type,cwd,extra_args,trials):
         trial_detail = []
         for cmd in cmds:
             try:
-                r=subprocess.run(cmd,cwd=cwd,capture_output=True,text=True,timeout=120,shell=False)
+                r=subprocess.run(cmd,cwd=cwd,capture_output=True,text=True,timeout=timeout,shell=False)
                 step_ok=r.returncode==0
                 trial_detail.append({"cmd":cmd,"exit_code":r.returncode,"ok":step_ok})
                 if not step_ok:
@@ -301,9 +326,22 @@ def _verify_gate(gate_type,cwd,extra_args,trials):
                         "exit_code":0 if trial_ok else 1})
         if trial_ok: passes+=1
     pr=passes/max(trials,1)*100
-    return {"gate_type":gate_type,"trials":trials,"passes":passes,
+    return {"gate_type":gate_type,"trials":trials,"passes":passes,"timeout_s":timeout,
             "pass_rate":round(pr,1),"passed":pr>=80.0 if trials>=3 else passes==trials,
             "results":results}
+
+def _coerce_scope(scope):
+    """Accept a glob list, or a comma/newline separated string, and return a list.
+
+    The declared schema is an array: a glob may legitimately contain a comma, which
+    a delimited string cannot represent. The string form is accepted only for
+    backward compatibility with older clients.
+    """
+    if isinstance(scope, str):
+        return [s.strip() for s in scope.replace("\n", ",").split(",") if s.strip()]
+    if isinstance(scope, list):
+        return [str(s).strip() for s in scope if str(s).strip()]
+    return []
 
 def _audit_scope(scope,files):
     ok=[f for f in files if any(fnmatch.fnmatch(f,g) for g in scope)]
@@ -409,7 +447,9 @@ def _call(rid,p):
                             _state["contract_scope_parsed"] = [s.strip() for s in scope_val.split(",")]
                         break
             _audit({"event":"check_contract","ok":r["ok"]})
-            return _rsp(rid,r)
+            write_decision({"session":SESSION_ID,"decision":"check_contract","ok":bool(r["ok"]),
+                            "missing_required":r.get("missing_required"),"task":_state.get("bound_task")})
+            return _rsp(rid,with_stall_warning(r,SESSION_ID,"check_contract"))
         if n=="operating_protocol":
             ws=a.get("workspace") or os.environ.get("AOF_WORKSPACE") or os.getcwd()
             c=_rfile(os.path.join(ws,"OPERATING_PROTOCOL.md"))
@@ -418,10 +458,12 @@ def _call(rid,p):
         if n=="verify_gate":
             if not _state["preflight_ok"]: return _err(rid,-32000,"Preflight not passed")
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
-            r=_verify_gate(a["gate_type"],a.get("cwd"),a.get("extra_args"),a.get("trials"))
+            r=_verify_gate(a["gate_type"],a.get("cwd"),a.get("extra_args"),a.get("trials"),a.get("timeout_s"))
             _state["last_verify_status"]="passed" if r.get("passed") else "failed"
             _audit({"event":"verify_gate","gate_type":a["gate_type"],"passed":r.get("passed")})
-            return _rsp(rid,r)
+            write_decision({"session":SESSION_ID,"decision":"verify_gate","gate_type":a["gate_type"],
+                            "passed":bool(r.get("passed")),"task":_state.get("bound_task")})
+            return _rsp(rid,with_stall_warning(r,SESSION_ID,"verify_gate"))
         if n=="audit_scope":
             if not _state["preflight_ok"]: return _err(rid,-32000,"Preflight not passed")
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
@@ -431,7 +473,7 @@ def _call(rid,p):
                 _state["scope_audit_task"] = None
                 _state["scope_audit_cwd"] = None
                 return _err(rid,-32005,"Contract scope is not available")
-            if a.get("scope") is not None and a["scope"] != scope:
+            if a.get("scope") is not None and _coerce_scope(a["scope"]) != scope:
                 _state["scope_audit_ok"] = False
                 _state["scope_audit_task"] = None
                 _state["scope_audit_cwd"] = None
@@ -463,7 +505,7 @@ def _call(rid,p):
             _audit({"event":"audit_scope","ok":r["ok"],"git_files":git_files})
             return _rsp(rid,r)
         if n=="session_log":
-            _audit({"event":a.get("event"),"data":a.get("data")}); return _rsp(rid,{"ok":True})
+            _audit({"event":a.get("event"),"data":a.get("data") or {}}); return _rsp(rid,{"ok":True})
         if n=="post_evidence":
             if not _state["preflight_ok"]: return _err(rid,-32000,"Preflight not passed")
             if not _state["contract_ok"]: return _err(rid,-32001,"Contract not checked")
@@ -496,6 +538,8 @@ def _call(rid,p):
                     "resolution":resolution,"exit_code":a.get("exit_code"),
                     "artifacts":a.get("artifacts",[]),"references":a.get("references",[]),
                     "duration_s":a.get("duration_s")})
+            write_decision({"session":SESSION_ID,"decision":"post_evidence","task":a["task_gid"],
+                            "resolution":resolution,"exit_code":a.get("exit_code")})
             result={"ok":True,"resolution":resolution,
                 "message":"Evidence logged to audit. Set TRACKER_TYPE=asana + TRACKER_TOKEN to also post to the tracker."}
             # Additive: post to the real tracker if configured (fail-soft on network).

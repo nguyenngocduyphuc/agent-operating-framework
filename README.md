@@ -6,20 +6,21 @@
 
 > A lightweight operational gate for AI-agent workspaces -- prevents wrong-repo, wrong-branch, and ungrounded execution.
 
-## One-command setup
+## Setup (3 steps)
 
 ```bash
-bash setup.sh your-project/
+# 1. Install the tool
+uv tool install .               # from a clone of this repo
+# or: pip install .
+
+# 2. Configure your workspace
+bash setup.sh your-project/    # creates .aof_policy.json + .agentframework marker
+
+# 3. Register the MCP server with your agent host
+claude mcp add aof -- aof start-mcp-server
 ```
 
-Or from a remote URL (no clone needed):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/nguyenngocduyphuc/agent-operating-framework/main/setup.sh | bash -s -- your-project/
-```
-
-Runs preflight, configures the workspace marker, creates initial commit, and shows MCP
-registration. Idempotent -- safe to re-run on an existing AOF workspace.
+Idempotent -- safe to re-run. The tool stays in your PATH; the project keeps only config.
 
 ## Features
 
@@ -117,27 +118,24 @@ Symptom first, then a prompt you can paste for your agent to self-diagnose.
 ## Quickstart
 
 ```bash
-# 1. Copy the runtime and policy template into your project
-cp -R core .aof_policy.example.json your-project/
-# Optional: copy credential templates when you need integrations
-cp -R adapters your-project/
-cd your-project
-# 2. Create a workspace marker
-touch .agentframework
-# 3. Run preflight
-python -m core.preflight
-# 4. Integrate MCP server with your agent host
-python -m core.mcp_server
+# 1. Install
+uv tool install .               # or: pip install .
+
+# 2. Configure workspace (config only -- no code copy)
+bash setup.sh your-project/
+
+# 3. Register MCP server
+claude mcp add aof -- aof start-mcp-server
 ```
 
-Configure your agent host's `.mcp.json`:
+Agent host `.mcp.json` (manual):
 
 ```json
 {
   "mcpServers": {
     "aof": {
-      "command": "python",
-      "args": ["-m", "core.mcp_server"],
+      "command": "aof",
+      "args": ["start-mcp-server"],
       "env": {}
     }
   }
@@ -175,7 +173,7 @@ AI agents drift. The same problems show up session after session: an agent commi
 
 AOF puts a lightweight gate at the session boundary. It runs at the start of every agent session and catches the same class of errors that a pre-flight checklist catches for a pilot: "Am I in the right place? Do I have what I need? What am I not allowed to do?" The gate is opt-in per workspace, takes under a second to run, and fails closed.
 
-AOF is not a platform. There are no servers to operate, no databases to maintain, no dashboards to check. It is a thin CLI tool with a companion MCP server, written in Python stdlib only. You can copy `core/` into any project and be running in five minutes. The contract is a markdown header, the evidence log is a JSONL file, and the policy is a flat JSON dict.
+AOF is not a platform. There are no servers to operate, no databases to maintain, no dashboards to check. It is a thin CLI tool with a companion MCP server, written in Python stdlib only. Install once, configure per project in five minutes. The contract is a markdown header, the evidence log is a JSONL file, and the policy is a flat JSON dict.
 
 The philosophy is contract-first, gate-on-path, evidence-before-done. Every task starts with a written contract that defines scope and stopping conditions. Every gate is checked along the execution path, not at the end. No task is closed without structured evidence. This is operational discipline, not middleware.
 
@@ -184,17 +182,14 @@ The philosophy is contract-first, gate-on-path, evidence-before-done. Every task
 ## Installation
 
 ```bash
-# Required: runtime and policy template (lightweight, no deps)
-cp -R core .aof_policy.example.json your-project/
-# Optional: credential templates for integrations
-cp -R adapters your-project/
+uv tool install .                            # from a local clone
+uv tool install agent-operating-framework   # from PyPI (once published)
+pip install .                               # pip fallback
 ```
 
-> **Note**: AOF is designed to be copied directly into projects rather than installed as a package. This avoids dependency management complexity and ensures full control over the framework.
-
-Keep host runtime state such as `.claude/`, `.codex/`, session logs, and credentials
-out of the distribution repository. Configure Claude Code or Codex to call the
-tracked `core.mcp_server` entry point; do not publish a user's local agent folder.
+The `aof` command is installed globally. Your project keeps only `.aof_policy.json`
+(configuration) and `.agentframework` (workspace marker). No framework code is copied
+into your project.
 
 ---
 

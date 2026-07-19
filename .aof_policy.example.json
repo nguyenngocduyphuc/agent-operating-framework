@@ -4,6 +4,7 @@
   "require_contract": true,
   "require_evidence": true,
   "require_handoff": true,
+  "require_karpathy": false,
   "allow_bootstrap_without_task": true,
   "expected_repository": "",
   "credential_groups": {

@@ -1,9 +1,15 @@
-"""Regression tests for core/mcp_server.py stdio transport.
+"""Regression tests for core/mcp_server.py stdio transport and result envelope.
 
 These would have caught the Content-Length read(4096) deadlock: each request is
 sent as ONE small ndjson line and the client then blocks waiting for the reply,
 sending no further bytes. A hard queue.get(timeout=...) makes a regressed server
 FAIL FAST instead of hanging the suite forever.
+
+They would ALSO have caught the empty-tool-output bug: the server answered
+tools/call with a bare business dict as `result`. The server looked healthy from
+raw JSON-RPC, but every MCP host reads `result.content` and rendered "The tool
+returned no output" — i.e. the product was unusable from any client. Asserting
+the envelope, not just the business keys, is what makes that visible in CI.
 """
 import json
 import os
@@ -18,6 +24,28 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "core" / "mcp_server.py"
 TIMEOUT_S = 5.0
+
+GOOD_BRIEF = "Task: t\nOwner: o\nScope: s\nDoD: d\nDo not: x\nStop if: y\nReturn: r\n"
+
+
+def envelope(resp):
+    """Assert the MCP tool-result envelope and return it."""
+    result = resp["result"]
+    assert "content" in result, (
+        f"tools/call result has no 'content' -- every MCP host renders this as "
+        f"EMPTY output. Got keys: {sorted(result)}"
+    )
+    assert isinstance(result["content"], list) and result["content"], "content must be a non-empty list"
+    block = result["content"][0]
+    assert block["type"] == "text", f"expected a text block, got {block.get('type')!r}"
+    assert isinstance(block["text"], str) and block["text"].strip(), "text block must be non-empty"
+    assert isinstance(result["isError"], bool), "isError must be present and boolean"
+    return result
+
+
+def payload(resp):
+    """Decode the JSON business payload carried in the envelope's text block."""
+    return json.loads(envelope(resp)["content"][0]["text"])
 
 
 class _Client:
@@ -93,12 +121,72 @@ def test_tools_list_after_initialize(client):
 
 def test_one_tools_call_roundtrip(client):
     client.request("initialize", req_id=1)
-    brief = (
-        "Task: t\nOwner: o\nScope: s\nDoD: d\nDo not: x\nStop if: y\nReturn: r\n"
-    )
-    resp = client.request("tools/call", {"name": "check_contract", "arguments": {"brief": brief}}, req_id=3)
+    resp = client.request("tools/call", {"name": "check_contract", "arguments": {"brief": GOOD_BRIEF}}, req_id=3)
     assert resp["id"] == 3
-    assert resp["result"]["ok"] is True
+    assert envelope(resp)["isError"] is False
+    assert payload(resp)["ok"] is True
+
+
+def test_tools_call_result_uses_mcp_content_envelope(client):
+    """A bare business dict as `result` makes every MCP host show empty output."""
+    client.request("initialize", req_id=1)
+    resp = client.request("tools/call", {"name": "check_contract", "arguments": {"brief": GOOD_BRIEF}}, req_id=2)
+    result = envelope(resp)
+    assert set(result) >= {"content", "isError"}
+    assert "ok" not in result, "business keys must live inside content[0].text, not on result"
+
+
+def test_every_tool_answers_with_the_envelope(client):
+    """All 7 tools, success or refusal, must be readable by a client."""
+    client.request("initialize", req_id=1)
+    tools = client.request("tools/list", req_id=2)["result"]["tools"]
+    assert len(tools) == 7, f"expected 7 tools, got {len(tools)}"
+    args = {
+        "check_contract": {"brief": GOOD_BRIEF},
+        "verify_gate": {"gate_type": "ruff"},
+        "audit_scope": {"scope": ["core/**"]},
+        "session_log": {"event": "goal"},
+        "post_evidence": {"task_gid": "T-1", "summary": "s"},
+        "operating_protocol": {"workspace": str(REPO)},
+        "preflight": {"cwd": str(REPO)},
+    }
+    for i, tool in enumerate(tools):
+        resp = client.request(
+            "tools/call", {"name": tool["name"], "arguments": args[tool["name"]]}, req_id=100 + i
+        )
+        envelope(resp)  # raises with a readable message if the envelope is wrong
+
+
+def test_refusal_is_a_readable_iserror_result_not_a_protocol_error(client):
+    """Gate refusals must reach the model as text it can act on."""
+    client.request("initialize", req_id=1)
+    resp = client.request("tools/call", {"name": "audit_scope", "arguments": {"scope": ["x/**"]}}, req_id=3)
+    assert "error" not in resp, "a gate refusal is a tool result, not a JSON-RPC protocol error"
+    assert envelope(resp)["isError"] is True
+    body = payload(resp)
+    assert body["error_code"] == -32000
+    assert "reflight" in body["error"], body
+    assert "preflight" in body["fix"], "the refusal must name the tool to call next"
+
+
+def test_unknown_tool_is_readable_and_lists_valid_tools(client):
+    client.request("initialize", req_id=1)
+    resp = client.request("tools/call", {"name": "nope", "arguments": {}}, req_id=3)
+    assert envelope(resp)["isError"] is True
+    body = payload(resp)
+    assert body["error_code"] == -32602
+    assert "check_contract" in body["fix"]
+
+
+def test_operating_protocol_returns_markdown_verbatim(client):
+    """Document tool: JSON-escaping a protocol doc costs tokens and readability."""
+    client.request("initialize", req_id=1)
+    resp = client.request(
+        "tools/call", {"name": "operating_protocol", "arguments": {"workspace": str(REPO)}}, req_id=3
+    )
+    text = envelope(resp)["content"][0]["text"]
+    assert envelope(resp)["isError"] is False
+    assert text.lstrip().startswith("#"), "expected raw markdown, not a JSON blob"
 
 
 def test_full_oneshot_sequence(client):
@@ -112,4 +200,4 @@ def test_full_oneshot_sequence(client):
         {"name": "check_contract", "arguments": {"brief": "Task: add health\nOwner: worker\nScope: api/\nDoD: tests pass\nDo not: change db\nStop if: out of scope\nReturn: diff\n"}},
         req_id=3,
     )
-    assert call["result"]["ok"] is True
+    assert payload(call)["ok"] is True

@@ -211,6 +211,21 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"verify_gat
 
 All commands exit 0 on success, 2 on blocker.
 
+### MCP response format
+
+Every `tools/call` reply uses the MCP result envelope, so hosts render it instead
+of showing an empty tool call:
+
+```json
+{"content": [{"type": "text", "text": "<JSON payload>"}], "isError": false}
+```
+
+Refusals from the gate (preflight not run, contract not checked, scope audit
+stale, ...) come back as `isError: true` with the same envelope — the text
+carries `error_code`, `error`, and a `fix` telling the agent what to call next.
+JSON-RPC `error` responses are reserved for protocol faults (unknown method,
+unparseable JSON).
+
 ---
 
 ## Configuration
@@ -220,6 +235,50 @@ All commands exit 0 on success, 2 on blocker.
 | `.agentframework` | Workspace marker file. AOF scans parent directories for this file to find the workspace root. |
 | `.aof_policy.json` | Workspace policy. Controls enforcement flags (`require_task`, `require_contract`, `require_evidence`, etc.). Start from `.aof_policy.example.json`. |
 | `adapters/.env` | Credentials and path overrides. Not committed. Template at `adapters/.env.example`. |
+
+### `require_karpathy` (default: `false`)
+
+Off by default: it raises the bar for what counts as a valid brief, and that is a
+workspace's call, not the framework's. Turn it on in `.aof_policy.json` when you
+want thinking-before-code to be a gate instead of a slogan:
+
+```json
+{ "require_karpathy": true }
+```
+
+With the flag on, `check_contract` adds three structural checks on top of the
+seven required fields. Each binds to machinery that runs later, so passing the
+check costs something:
+
+| Principle | Check | Teeth |
+|---|---|---|
+| 1. Think before coding | brief has `Assumptions:` or `Tradeoffs:` with substance | the claim is named and lands in the audit trail |
+| 4. Goal-driven execution | brief has a non-trivial `DoD-cmd:` | the server **runs** it via `verify_gate` `gate_type="dod"` |
+| 2 + 3. Simplicity / surgical | `Scope:` is bounded (no `*`, `**/*`, `.`) | `audit_scope` can actually catch drift |
+
+A brief that satisfies it:
+
+```
+Task: Add a health endpoint
+Owner: worker
+Scope: src/api/health.py, tests/test_health.py
+Assumptions: the router already mounts /api; if it does not, this needs a router change first.
+DoD: GET /health returns 200
+DoD-cmd: python -m pytest tests/test_health.py
+Do not: touch deploy config
+Stop if: the fix needs a router change
+Return: diff + test output
+```
+
+When a brief fails, `check_contract` returns `ok: false` plus a `hint` naming
+each failed principle, the problem, and the fix.
+
+**Limits, stated plainly.** These checks test the *structure* of a brief, not the
+truth of it. `Assumptions: none that matter for this change` passes. `DoD-cmd:`
+rejects a literal no-op list (`true`, `:`, `echo ok`) but not a crafted one like
+`python -c pass`. This is detection, not prevention: it makes an unthought brief
+an explicit, auditable lie rather than a silent omission. A reviewer still judges
+quality.
 
 ---
 

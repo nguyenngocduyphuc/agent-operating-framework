@@ -13,8 +13,9 @@
 uv tool install .               # from a clone of this repo
 # or: pip install .
 
-# 2. Configure your workspace
-bash setup.sh your-project/    # creates .aof_policy.json + .agentframework marker
+# 2. Configure your workspace (pure Python, Windows-safe)
+aof init your-project/         # creates .aof_policy.json + .agentframework marker
+aof doctor your-project/       # real-probe health check, plain vi/en output, exit 0/2
 
 # 3. Register the MCP server with your agent host
 claude mcp add aof -- aof start-mcp-server

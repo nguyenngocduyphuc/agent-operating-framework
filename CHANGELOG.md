@@ -20,11 +20,27 @@
   visible migration warning. Renaming a policy key must never silently disable
   enforcement (found in the 2026-07-20 audit as a live fail-open).
 
+- **`aof init` + `aof doctor`**: zero-knowledge onboarding. `init` prepares a
+  workspace (default policy + marker, idempotent, pure Python — Windows-safe).
+  `doctor` health-checks the installation with REAL probes — the MCP check
+  performs a live stdio handshake with a spawned server and counts all 8 tools;
+  a doctor that guesses is the false-success dispatcher all over again. Plain
+  vi/en output, always ending with one concrete next step. Exit 0/2.
+- `docs/QUICKSTART_VI.md`: 5-minute Vietnamese quickstart for operators who do
+  not know git, tests, or MCP.
+
 ### Fixed
 
 - Test suite no longer inherits the enclosing host workspace's `.aof_policy.json`
   when aof is vendored inside another repo (`tests/conftest.py` pins
   `AOF_WORKSPACE`).
+
+### Noted
+
+- `aof doctor` immediately caught a real environment defect in this repo's own
+  CI habit: the suite had been running under macOS system Python 3.9 while
+  `pyproject.toml` declares `requires-python >= 3.10`. Verification now runs
+  under a >= 3.10 interpreter.
 
 ## 0.2.0b2 (unreleased)
 

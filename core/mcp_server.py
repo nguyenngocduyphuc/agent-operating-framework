@@ -26,7 +26,9 @@ import time
 import uuid
 from pathlib import Path
 
+from core import heartbeat as heartbeat_mod
 from core import lease as lease_mod
+from core import oplog as oplog_mod
 from core.check_contract import validate as validate_contract
 from core.enforcement import (
     audit_file,
@@ -80,6 +82,32 @@ TOOLS = [
      "inputSchema":{"type":"object","properties":{
         "lang":{"type":"string","enum":["vi","en"],
                 "description":"report language (default: policy report_language, else vi)"}}}},
+    {"name":"op_log",
+     "description":"Plain-language operations ledger digest (host-side ~/.aof): sessions, "
+                   "done-with-proof, blocked, lock collisions, failed verifications.",
+     "inputSchema":{"type":"object","properties":{
+        "since_hours":{"type":"number","minimum":0.1,"maximum":720},
+        "task":{"type":"string"},
+        "lang":{"type":"string","enum":["vi","en"]}}}},
+    {"name":"session_recap",
+     "description":"Write a self-contained HTML session recap into <workspace>/docs/sessions/ "
+                   "and return its path. Per-session docs that update themselves.",
+     "inputSchema":{"type":"object","properties":{
+        "since_hours":{"type":"number","minimum":0.1,"maximum":720},
+        "lang":{"type":"string","enum":["vi","en"]}}}},
+    {"name":"session_handoff",
+     "description":"Write a markdown session handoff (Done/Blocked/Open + next-session "
+                   "checklist) into <workspace>/docs/sessions/ and return its path.",
+     "inputSchema":{"type":"object","properties":{
+        "since_hours":{"type":"number","minimum":0.1,"maximum":720},
+        "lang":{"type":"string","enum":["vi","en"]}}}},
+    {"name":"worker_watch",
+     "description":"Judge a worker by its OUTPUT file mtime/size, never by 'session alive'. "
+                   "fresh | stale | missing.",
+     "inputSchema":{"type":"object","properties":{
+        "path":{"type":"string"},
+        "stale_after_s":{"type":"integer","minimum":10,"maximum":86400},
+        "lang":{"type":"string","enum":["vi","en"]}},"required":["path"]}},
 ]
 
 # Explicit gate allowlist — unknown gates never execute as commands
@@ -746,6 +774,38 @@ def _call(rid,p):
         if n=="status_report":
             # Deliberately NOT gated: a blocked operator most needs to see why.
             return _tool_ok(rid,None,text=_status_report(a.get("lang")))
+        if n in ("op_log","session_recap","session_handoff"):
+            # Report tools, host-side: this is what makes Cowork/Claude Code
+            # equals — one server, one ledger, every environment. Never gated.
+            sh=a.get("since_hours")
+            since=(time.time()-float(sh)*3600) if sh else None
+            report=oplog_mod.build_digest(since_ts=since,
+                                          task=a.get("task") if n=="op_log" else None)
+            lang=a.get("lang")
+            if n=="op_log":
+                return _tool_ok(rid,None,text=oplog_mod.format_digest(report,lang))
+            ws=_state.get("bound_workspace") or os.environ.get("AOF_WORKSPACE") or os.getcwd()
+            stamp=time.strftime("%Y%m%d_%H%M%S")
+            if n=="session_recap":
+                content=oplog_mod.render_html(report,lang); fname=f"RECAP_{stamp}.html"
+            else:
+                content=oplog_mod.format_handoff(report,lang); fname=f"HANDOFF_{stamp}.md"
+            outdir=oplog_mod.default_session_dir(ws)
+            os.makedirs(outdir,exist_ok=True)
+            fpath=os.path.join(outdir,fname)
+            with open(fpath,"w",encoding="utf-8") as fh:
+                fh.write(content)
+            _audit({"event":n,"path":fpath})
+            return _tool_ok(rid,{"ok":True,"path":fpath,
+                                 "summary":{"sessions":report["sessions"],"done":report["done"],
+                                            "blocked":report["blocked"],
+                                            "collisions":report["collisions"]}})
+        if n=="worker_watch":
+            r=heartbeat_mod.check(a["path"],
+                                  int(a.get("stale_after_s") or heartbeat_mod.DEFAULT_STALE_AFTER_S))
+            r["ok"]=r["status"]=="fresh"
+            r["message"]=heartbeat_mod.format_check(r,a.get("lang"))
+            return _tool_ok(rid,r)
         if n=="post_evidence":
             if not _state["preflight_ok"]: return _tool_err(rid,-32000,*_FIX_PREFLIGHT)
             if _state.get("bound_lane") == "lite":

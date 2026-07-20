@@ -67,6 +67,13 @@
   decompose → delegate → controlled execution → conditional acceptance →
   verify → evidence → handoff → HTML recap, with per-step acceptance conditions.
 
+- **Four report tools promoted to MCP (12 tools total)**: `op_log`,
+  `session_recap`, `session_handoff`, `worker_watch`. Rationale: sandboxed
+  hosts (Cowork) cannot read `~/.aof` or run host CLIs — host-side MCP tools
+  make every environment equal: one server, one ledger. `aof doctor` now
+  checks the tool count against the canonical TOOLS catalog dynamically —
+  a hardcoded count is exactly how a stale copy answers "looks fine".
+
 ### Fixed
 
 - Test suite no longer inherits the enclosing host workspace's `.aof_policy.json`

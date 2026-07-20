@@ -33,7 +33,7 @@ _T = {
             "git": "Có git trên máy",
             "workspace": "Nhận diện được thư mục làm việc",
             "policy": "Tập luật (.aof_policy.json) đọc được",
-            "mcp": "Máy chủ MCP trả lời thật (bắt tay + đủ 8 công cụ)",
+            "mcp": "Máy chủ MCP trả lời thật (bắt tay + đủ bộ công cụ)",
             "lease": "Ổ khoá nhiệm vụ ghi được",
         },
         "fixes": {
@@ -62,7 +62,7 @@ _T = {
             "git": "git available",
             "workspace": "Workspace resolvable",
             "policy": "Policy file (.aof_policy.json) readable",
-            "mcp": "MCP server answers for real (handshake + all 8 tools)",
+            "mcp": "MCP server answers for real (handshake + full toolset)",
             "lease": "Task-lease store writable",
         },
         "fixes": {
@@ -128,9 +128,12 @@ def _check_mcp_handshake(ws: str) -> tuple[bool, str]:
             tools = msg["result"].get("tools")
     if tools is None:
         return False, "no tools/list reply on stdout"
-    if len(tools) != 8:
-        return False, f"expected 8 tools, server reported {len(tools)}"
-    return True, f"8 tools, server v{__version__}"
+    # Expected count comes from the canonical TOOLS catalog, not a literal:
+    # a hardcoded number is exactly how a stale copy answers "looks fine".
+    from core.mcp_server import TOOLS
+    if len(tools) != len(TOOLS):
+        return False, f"expected {len(TOOLS)} tools, server reported {len(tools)}"
+    return True, f"{len(tools)} tools, server v{__version__}"
 
 
 def _check_lease_store(ws: str) -> tuple[bool, str]:

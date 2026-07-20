@@ -17,7 +17,8 @@ GO-RISK-LANE), và artifact_index 30 ngày gần nhất. Không cite được = 
 Canonical duy nhất: repo này. Mọi đăng ký MCP/CLI phải trỏ **đường dẫn file
 tuyệt đối vào repo này**, không bao giờ `-m core.*` từ cwd (root workspace có
 bản copy `core/` cũ sẽ shadow — đã xảy ra 21/07). Smoke bắt buộc sau đăng ký:
-handshake phải trả **đúng 8 tools**.
+handshake phải trả **đúng số tool mà catalog TOOLS của canonical khai**
+(`aof doctor` tự đối chiếu động — không hardcode con số).
 
 ## Luật 3 — Artifact trình CEO phải vào sổ ngay
 

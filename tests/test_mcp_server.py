@@ -136,26 +136,40 @@ def test_tools_call_result_uses_mcp_content_envelope(client):
     assert "ok" not in result, "business keys must live inside content[0].text, not on result"
 
 
-def test_every_tool_answers_with_the_envelope(client):
-    """All 8 tools, success or refusal, must be readable by a client."""
-    client.request("initialize", req_id=1)
-    tools = client.request("tools/list", req_id=2)["result"]["tools"]
-    assert len(tools) == 8, f"expected 8 tools, got {len(tools)}"
-    args = {
-        "check_contract": {"brief": GOOD_BRIEF},
-        "verify_gate": {"gate_type": "ruff"},
-        "audit_scope": {"scope": ["core/**"]},
-        "session_log": {"event": "goal"},
-        "post_evidence": {"task_gid": "T-1", "summary": "s"},
-        "operating_protocol": {"workspace": str(REPO)},
-        "preflight": {"cwd": str(REPO)},
-        "status_report": {"lang": "en"},
-    }
-    for i, tool in enumerate(tools):
-        resp = client.request(
-            "tools/call", {"name": tool["name"], "arguments": args[tool["name"]]}, req_id=100 + i
-        )
-        envelope(resp)  # raises with a readable message if the envelope is wrong
+def test_every_tool_answers_with_the_envelope(tmp_path):
+    """All 12 tools, success or refusal, must be readable by a client."""
+    client = _Client(extra_env={"AOF_WORKSPACE": str(tmp_path),
+                                "AOF_AUDIT_DIR": str(tmp_path / "aofhome")})
+    try:
+        client.request("initialize", req_id=1)
+        tools = client.request("tools/list", req_id=2)["result"]["tools"]
+        assert len(tools) == 12, f"expected 12 tools, got {len(tools)}"
+        args = {
+            "check_contract": {"brief": GOOD_BRIEF},
+            "verify_gate": {"gate_type": "ruff"},
+            "audit_scope": {"scope": ["core/**"]},
+            "session_log": {"event": "goal"},
+            "post_evidence": {"task_gid": "T-1", "summary": "s"},
+            "operating_protocol": {"workspace": str(REPO)},
+            "preflight": {"cwd": str(REPO)},
+            "status_report": {"lang": "en"},
+            "op_log": {"since_hours": 1},
+            "session_recap": {"since_hours": 1},
+            "session_handoff": {"since_hours": 1},
+            "worker_watch": {"path": str(tmp_path / "nope.log")},
+        }
+        for i, tool in enumerate(tools):
+            resp = client.request(
+                "tools/call", {"name": tool["name"], "arguments": args[tool["name"]]},
+                req_id=100 + i,
+            )
+            envelope(resp)  # raises with a readable message if the envelope is wrong
+        # recap/handoff must land under the WORKSPACE, not the repo
+        sessions = tmp_path / "docs" / "sessions"
+        assert any(p.suffix == ".html" for p in sessions.iterdir())
+        assert any(p.suffix == ".md" for p in sessions.iterdir())
+    finally:
+        client.close()
 
 
 def test_refusal_is_a_readable_iserror_result_not_a_protocol_error(client):

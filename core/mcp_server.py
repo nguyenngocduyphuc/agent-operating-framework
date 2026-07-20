@@ -266,20 +266,35 @@ def _inventory_sig(files) -> str:
     joined = "\n".join(files)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
+def _gate_python(cwd):
+    """Python of the PROJECT under test, not aof's own interpreter.
+
+    Gate runs the project's tests/lint, so it must use an interpreter that sees
+    that project's dependencies. sys.executable is aof's python — in a project
+    with its own venv it lacks those deps and makes the gate always red for
+    environment reasons rather than code defects.
+    """
+    for rel in (".venv/bin/python", ".venv/Scripts/python.exe"):
+        candidate = Path(cwd) / rel
+        if candidate.is_file():
+            return str(candidate)
+    return sys.executable
+
 def _gate_commands(gate_type, cwd, extra):
     """Resolve allowlisted gate to fixed argv list(s). Never shell; never use gate_type as cmd."""
     extra = list(extra or [])
+    py = _gate_python(cwd)
     if gate_type == "ruff":
-        return [[sys.executable, "-m", "ruff", "check", "."] + extra]
+        return [[py, "-m", "ruff", "check", "."] + extra]
     if gate_type == "pytest":
-        return [[sys.executable, "-m", "pytest", "-x"] + extra]
+        return [[py, "-m", "pytest", "-x"] + extra]
     if gate_type == "quality":
         # Meaningful portable proof: project lint + tests when present.
         # Never treat byte-compilation alone as quality evidence.
-        cmds = [[sys.executable, "-m", "ruff", "check", "."] + extra]
+        cmds = [[py, "-m", "ruff", "check", "."] + extra]
         # Avoid re-entrant full suite when already under pytest.
         if (Path(cwd) / "tests").is_dir() and not os.environ.get("PYTEST_CURRENT_TEST"):
-            cmds.append([sys.executable, "-m", "pytest", "-x", "tests"] + extra)
+            cmds.append([py, "-m", "pytest", "-x", "tests"] + extra)
         return cmds
     return None
 

@@ -159,7 +159,13 @@ def _rfile(p):
 # Tool implementations
 # ---------------------------------------------------------------------------
 def _run_preflight(cwd,task,bootstrap):
-    cmd=[sys.executable,"-m","core.preflight","--json"]
+    # ABSOLUTE file path, never `-m core.preflight`: with -m, sys.path[0] is the
+    # server's cwd, so a stale `core/` copy in the host workspace root silently
+    # shadows this package — observed live 2026-07-21 as a fail-open preflight
+    # (legacy hard-mode policy ignored, status "clear" with no task). The gate
+    # must run the preflight that shipped WITH this server, unconditionally.
+    _preflight_file = str(Path(__file__).resolve().parent / "preflight.py")
+    cmd=[sys.executable,_preflight_file,"--json"]
     if task:
         cmd+=["--task",task]
     if bootstrap:

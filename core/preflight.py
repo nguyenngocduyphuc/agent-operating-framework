@@ -56,6 +56,17 @@ def workspace_root(cwd):
     return marker or outer_repo or os.path.abspath(cwd)
 
 
+# v1 policy schemas used tracker/style-specific key names. If a legacy key is
+# present and its modern twin is NOT explicitly set, the legacy value is honoured
+# and the migration is reported. Silently ignoring legacy keys turned a hard-mode
+# workspace into fail-open (found in the 2026-07-20 audit: old policy said
+# require_asana_task=true, new loader read require_task=false, gate said "clear").
+LEGACY_POLICY_ALIASES = {
+    "require_asana_task": "require_task",
+    "require_ponytail": "require_karpathy",
+}
+
+
 def load_policy(ws):
     policy_path = os.environ.get("AOF_POLICY_FILE") or os.path.join(ws, ".aof_policy.json")
     default = {
@@ -73,7 +84,14 @@ def load_policy(ws):
         with open(policy_path, encoding="utf-8") as f:
             loaded = json.load(f)
         if isinstance(loaded, dict):
+            migrated = []
+            for legacy, modern in LEGACY_POLICY_ALIASES.items():
+                if legacy in loaded and modern not in loaded:
+                    loaded[modern] = loaded[legacy]
+                    migrated.append(f"{legacy} -> {modern}")
             default.update(loaded)
+            if migrated:
+                default["policy_migrated_keys"] = migrated
         default["policy_loaded"] = True
     except Exception as exc:
         default["policy_error"] = str(exc)
@@ -170,6 +188,12 @@ def main():
     repo = nearest_repo(cwd)
     blockers, warns = [], []
     policy = load_policy(ws)
+
+    for migration in policy.get("policy_migrated_keys", []):
+        warns.append(
+            f"Legacy policy key honoured: {migration}. Rename it in .aof_policy.json "
+            "to the modern key — the legacy name is deprecated."
+        )
 
     bootstrap_allowed = bool(args.bootstrap and policy.get("allow_bootstrap_without_task"))
     if policy.get("require_task") and not args.task and not bootstrap_allowed:

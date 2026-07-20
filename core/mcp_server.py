@@ -26,6 +26,7 @@ import time
 import uuid
 from pathlib import Path
 
+from core import lease as lease_mod
 from core.check_contract import validate as validate_contract
 from core.enforcement import (
     audit_file,
@@ -70,6 +71,12 @@ TOOLS = [
         "exit_code":{"type":"integer"},"artifacts":{"type":"array","items":{"type":"string"}},
         "references":{"type":"array","items":{"type":"string"}},
         "duration_s":{"type":"number"}},"required":["task_gid","summary"]}},
+    {"name":"status_report",
+     "description":"Plain-language session status for non-technical operators (vi/en). "
+                   "No git/test jargon: what is done, what is missing, what to do next.",
+     "inputSchema":{"type":"object","properties":{
+        "lang":{"type":"string","enum":["vi","en"],
+                "description":"report language (default: policy report_language, else vi)"}}}},
 ]
 
 # Explicit gate allowlist — unknown gates never execute as commands
@@ -103,6 +110,9 @@ _state = {
     "scope_audit_cwd": None,
     "scope_audit_sig": None,
     "contract_dod_cmd": None,
+    "lease_task": None,
+    "lease_cwd": None,
+    "lease_info": None,
 }
 def _ensure_audit():
     ensure_audit_dir()
@@ -371,6 +381,107 @@ def _verify_gate(gate_type,cwd,extra_args,trials,timeout_s=None):
             "pass_rate":round(pr,1),"passed":pr>=80.0 if trials>=3 else passes==trials,
             "results":results}
 
+# ---------------------------------------------------------------------------
+# Plain-language status report (no-code operators)
+# ---------------------------------------------------------------------------
+_REPORT = {
+    "vi": {
+        "steps": [
+            ("preflight", "Kiểm tra môi trường làm việc"),
+            ("contract", "Hợp đồng công việc (mục tiêu, phạm vi, tiêu chí xong)"),
+            ("verify", "Kiểm chứng chất lượng"),
+            ("scope", "Soát phạm vi thay đổi"),
+        ],
+        "blocked": "⛔ BỊ CHẶN — chưa được phép làm việc",
+        "preparing": "🟡 ĐANG CHUẨN BỊ",
+        "ready": "🟢 SẴN SÀNG LÀM VIỆC",
+        "done": "✅ XONG — CÓ BẰNG CHỨNG",
+        "task": "Nhiệm vụ",
+        "place": "Nơi làm việc",
+        "lease": "Quyền làm việc: phiên này đang giữ nhiệm vụ — không phiên nào khác chen vào được.",
+        "why": "Lý do",
+        "next": "Bước tiếp theo",
+        "next_map": {
+            "preflight": "Chạy 'preflight' để kiểm tra môi trường trước khi làm bất cứ việc gì.",
+            "contract": "Khai hợp đồng công việc bằng 'check_contract' (nói rõ làm gì, ở đâu, khi nào là xong).",
+            "verify": "Chạy 'verify_gate' để máy tự kiểm chứng chất lượng — không tự tin lời khai.",
+            "scope": "Chạy 'audit_scope' để chắc chắn không sửa lan ra ngoài phạm vi.",
+            "done": "Chạy 'post_evidence' để chốt việc kèm bằng chứng.",
+        },
+    },
+    "en": {
+        "steps": [
+            ("preflight", "Workspace safety check"),
+            ("contract", "Work contract (goal, scope, definition of done)"),
+            ("verify", "Quality verification"),
+            ("scope", "Change-scope audit"),
+        ],
+        "blocked": "⛔ BLOCKED — not cleared to work",
+        "preparing": "🟡 PREPARING",
+        "ready": "🟢 READY TO WORK",
+        "done": "✅ DONE — WITH PROOF",
+        "task": "Task",
+        "place": "Working in",
+        "lease": "Work lock: this session holds the task — no other session can cut in.",
+        "why": "Why",
+        "next": "Next step",
+        "next_map": {
+            "preflight": "Run 'preflight' to check the environment before doing anything.",
+            "contract": "Declare the work contract with 'check_contract' (what, where, when it counts as done).",
+            "verify": "Run 'verify_gate' so the machine verifies quality — never trust a claim.",
+            "scope": "Run 'audit_scope' to prove no changes leaked outside the scope.",
+            "done": "Run 'post_evidence' to close the work with proof.",
+        },
+    },
+}
+
+
+def _status_report(lang=None):
+    """Render session state as plain language a non-technical operator can act on."""
+    policy = _workspace_policy()
+    if lang not in ("vi", "en"):
+        lang = policy.get("report_language") if policy.get("report_language") in ("vi", "en") else "vi"
+    t = _REPORT[lang]
+    flags = {
+        "preflight": bool(_state["preflight_ok"]),
+        "contract": bool(_state["contract_ok"]),
+        "verify": _state["last_verify_status"] == "passed",
+        "scope": bool(_state["scope_audit_ok"]),
+    }
+    pf = _state.get("last_preflight") or {}
+    lines = []
+    if not flags["preflight"]:
+        header = t["blocked"] if pf else t["preparing"]
+    elif all(flags.values()):
+        header = t["done"]
+    elif flags["contract"]:
+        header = t["ready"]
+    else:
+        header = t["preparing"]
+    lines.append(header)
+    lines.append("")
+    if _state.get("bound_task"):
+        lines.append(f"{t['task']}: {_state['bound_task']}")
+    if pf.get("repo") and pf.get("branch"):
+        lines.append(f"{t['place']}: {pf.get('repo')} @ {pf.get('branch')}")
+    if _state.get("lease_task"):
+        lines.append(t["lease"])
+    lines.append("")
+    for key, label in t["steps"]:
+        mark = "✔" if flags[key] else "✘"
+        lines.append(f"  {mark} {label}")
+    blockers = pf.get("blockers") or []
+    if blockers and not flags["preflight"]:
+        lines.append("")
+        lines.append(f"{t['why']}:")
+        for b in blockers[:5]:
+            lines.append(f"  - {b}")
+    nxt = next((k for k, _label in t["steps"] if not flags[k]), "done")
+    lines.append("")
+    lines.append(f"{t['next']}: {t['next_map'][nxt]}")
+    return "\n".join(lines)
+
+
 def _coerce_scope(scope):
     """Accept a glob list, or a comma/newline separated string, and return a list.
 
@@ -466,6 +577,30 @@ def _call(rid,p):
                 _state["bound_workspace"] = None
                 _state["bound_cwd"] = None
                 _state["bound_task"] = None
+            # C2: exclusive task lease — a second live session on the same
+            # (repo, task) is refused BEFORE any gate opens. Fail closed.
+            if _state["preflight_ok"]:
+                task = _state["bound_task"]
+                prev = _state.get("lease_task")
+                if prev and prev != task:
+                    lease_mod.release(prev, _state.get("lease_cwd") or os.getcwd(), SESSION_ID)
+                    _state.update({"lease_task": None, "lease_cwd": None, "lease_info": None})
+                if task:
+                    lr = lease_mod.acquire(task, _state["bound_cwd"], SESSION_ID)
+                    if not lr.get("ok"):
+                        _state.update({"preflight_ok": False, "bound_workspace": None,
+                                       "bound_cwd": None, "bound_task": None})
+                        _audit({"event": "lease_conflict", "task": task,
+                                "holder": lr.get("holder"), "status": lr.get("status")})
+                        return _tool_err(rid, -32011,
+                                         lr.get("detail") or lr.get("error") or "task lease unavailable",
+                                         "Another LIVE session holds this task. Wait for it, stop it, "
+                                         "or preflight a different task. Never work the same task from "
+                                         "two sessions at once.")
+                    _state.update({"lease_task": task, "lease_cwd": _state["bound_cwd"],
+                                   "lease_info": lr})
+                    r["lease"] = {"status": lr.get("status")}
+                    _audit({"event": "lease", "task": task, "status": lr.get("status")})
             return _tool_ok(rid,r)
         if n=="check_contract":
             _state["last_verify_status"] = None
@@ -558,6 +693,9 @@ def _call(rid,p):
             return _tool_ok(rid,r)
         if n=="session_log":
             _audit({"event":a.get("event"),"data":a.get("data") or {}}); return _tool_ok(rid,{"ok":True})
+        if n=="status_report":
+            # Deliberately NOT gated: a blocked operator most needs to see why.
+            return _tool_ok(rid,None,text=_status_report(a.get("lang")))
         if n=="post_evidence":
             if not _state["preflight_ok"]: return _tool_err(rid,-32000,*_FIX_PREFLIGHT)
             if not _state["contract_ok"]: return _tool_err(rid,-32001,*_FIX_CONTRACT)
@@ -649,6 +787,10 @@ def main():
             _send(_err(None,-32700,f"Parse error: {e}"))
             continue
         _send(_handle(req))
+    # Session over: give the task back so the next session is never blocked
+    # by a lease whose holder simply exited.
+    if _state.get("lease_task"):
+        lease_mod.release(_state["lease_task"], _state.get("lease_cwd") or os.getcwd(), SESSION_ID)
     _audit({"event":"session_end"})
 
 if __name__=="__main__":

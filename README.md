@@ -26,7 +26,9 @@ Idempotent -- safe to re-run. The tool stays in your PATH; the project keeps onl
 
 - **Preflight gate** -- detects workspace, repo, branch, and credential gaps before work starts. Exit 0 = ready, exit 2 = fix first.
 - **Execution contract** -- scope-lock every task with Task/Owner/Scope/DoD/Stop-if/Return. No silent expansion, no scope creep.
-- **MCP server** -- stdio JSON-RPC server for agent-host integration (Claude Code, Cline, Cursor, etc.). Exposes `preflight`, `check_contract`, `verify_gate`, `audit_scope`, `session_log`, and `post_evidence` tools.
+- **MCP server** -- stdio JSON-RPC server for agent-host integration (Claude Code, Cline, Cursor, etc.). Exposes `preflight`, `check_contract`, `verify_gate`, `audit_scope`, `session_log`, `post_evidence`, and `status_report` tools.
+- **Task lease** -- one task, one live session. Keyed by the git common dir, so all linked worktrees of a repo share one lock. A second live session on the same task is refused before any gate opens; stale leases (dead holder) are taken over with provenance.
+- **Plain-language status** -- `status_report` renders session state in Vietnamese or English for non-technical operators: Blocked / Preparing / Ready / Done-with-proof, always with a concrete next step.
 - **Scope audit** -- compares changed files against the active contract scope before claiming done. Catches side-quests automatically.
 - **Verify gate** -- runs quality checks (ruff, pytest, custom gates) with optional multi-trial statistical pass for flaky tests.
 - **Evidence log** -- structured audit trail to `~/.aof/audit.jsonl`. Every action is logged: decisions, gates, blockers, outcomes.

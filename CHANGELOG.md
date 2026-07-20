@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 (unreleased) — operational trust for no-code operators
+
+### Added
+
+- **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
+  identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo
+  shares ONE lease namespace. A second live session preflighting the same task is
+  refused (`error_code -32011`) before any gate opens; a dead holder's lease is
+  taken over with provenance; the lease is released on session end. Encodes the
+  2026-07-20 incident: three same-day cases of two sessions trampling one branch.
+- **`status_report` tool (8th MCP tool)**: plain-language session status for
+  non-technical operators, Vietnamese or English (`report_language` policy key,
+  `lang` argument). Four states — Blocked / Preparing / Ready / Done-with-proof —
+  always ending with a concrete "next step". Deliberately never gated: a blocked
+  operator most needs to see why.
+- **Legacy policy compatibility**: v1 keys `require_asana_task` and
+  `require_ponytail` are honoured as `require_task` / `require_karpathy` with a
+  visible migration warning. Renaming a policy key must never silently disable
+  enforcement (found in the 2026-07-20 audit as a live fail-open).
+
+### Fixed
+
+- Test suite no longer inherits the enclosing host workspace's `.aof_policy.json`
+  when aof is vendored inside another repo (`tests/conftest.py` pins
+  `AOF_WORKSPACE`).
+
 ## 0.2.0b2 (unreleased)
 
 ### Breaking

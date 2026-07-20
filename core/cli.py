@@ -33,6 +33,20 @@ def main() -> None:
     p_doc.add_argument("--lang", choices=["vi", "en"], default=None)
     p_doc.add_argument("--json", action="store_true", dest="as_json")
 
+    p_log = sub.add_parser("log", help="Plain-language operations ledger from the audit trail.")
+    p_log.add_argument("--since-hours", type=float, default=None,
+                       help="look back N hours (default: since local midnight)")
+    p_log.add_argument("--task", default=None)
+    p_log.add_argument("--lang", choices=["vi", "en"], default=None)
+    p_log.add_argument("--json", action="store_true", dest="as_json")
+
+    p_watch = sub.add_parser("watch", help="Judge a worker by its OUTPUT file mtime/size, not its session.")
+    p_watch.add_argument("file")
+    p_watch.add_argument("--stale-after", type=int, default=None,
+                         help="seconds without a write before 'hung' (default 300)")
+    p_watch.add_argument("--lang", choices=["vi", "en"], default=None)
+    p_watch.add_argument("--json", action="store_true", dest="as_json")
+
     args = parser.parse_args()
 
     if args.command == "start-mcp-server":
@@ -48,6 +62,21 @@ def main() -> None:
         print(json.dumps(report, ensure_ascii=False, indent=2) if args.as_json
               else format_doctor(report))
         sys.exit(0 if report["ok"] else 2)
+    elif args.command == "log":
+        import time as _time
+
+        from core.oplog import build_digest, format_digest
+        since = (_time.time() - args.since_hours * 3600) if args.since_hours else None
+        report = build_digest(since_ts=since, task=args.task)
+        print(json.dumps(report, ensure_ascii=False, indent=2) if args.as_json
+              else format_digest(report, args.lang))
+        sys.exit(0)
+    elif args.command == "watch":
+        from core.heartbeat import DEFAULT_STALE_AFTER_S, check, format_check
+        result = check(args.file, args.stale_after or DEFAULT_STALE_AFTER_S)
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.as_json
+              else format_check(result, args.lang))
+        sys.exit(0 if result["status"] == "fresh" else 2)
     else:
         parser.print_help()
         sys.exit(0)

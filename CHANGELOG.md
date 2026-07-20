@@ -28,6 +28,16 @@
   vi/en output, always ending with one concrete next step. Exit 0/2.
 - `docs/QUICKSTART_VI.md`: 5-minute Vietnamese quickstart for operators who do
   not know git, tests, or MCP.
+- **`aof log`**: the operator's daily ledger. Digests audit.jsonl +
+  decisions.jsonl into plain vi/en: sessions, done-with-proof, closed-as-blocked,
+  lease collisions, failed verifications — per task, with timestamps. Honesty
+  rule: reports only what the enforcement layer recorded; a Blocked is shown
+  with the same prominence as a Done.
+- **`aof watch`**: worker liveness by OUTPUT file mtime/size, never by "session
+  alive" (the 18-minute hang of 2026-07-20 was invisible to session-based
+  watchdogs). fresh/stale/missing, plain vi/en, exit 0/2.
+- `docs/OPERATOR_WORKFLOW_VI.md`: the 5-step daily operating loop and the
+  measured operational value table.
 
 ### Fixed
 

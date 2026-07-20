@@ -47,7 +47,10 @@ MAX_GATE_TIMEOUT_S = 1800
 TOOLS = [
     {"name":"preflight","description":"Run AOF preflight gate","inputSchema":{"type":"object","properties":{
         "cwd":{"type":"string"},"task":{"type":"string","description":"Task ID to bind"},
-        "bootstrap":{"type":"boolean"}}}},
+        "bootstrap":{"type":"boolean"},
+        "lane":{"type":"string","enum":["lite","risk"],
+                "description":"lite = preflight+evidence only (needs lanes_enabled policy; "
+                              "auto-escalates to risk on multi-file or risky paths). Default risk."}}}},
     {"name":"check_contract","description":"Validate 7 contract fields + References","inputSchema":{"type":"object","properties":{
         "brief":{"type":"string"}},"required":["brief"]}},
     {"name":"operating_protocol","description":"Return OPERATING_PROTOCOL.md","inputSchema":{"type":"object","properties":{
@@ -113,7 +116,14 @@ _state = {
     "lease_task": None,
     "lease_cwd": None,
     "lease_info": None,
+    "bound_lane": "risk",
+    "approval_pending": False,
 }
+
+# Lite lane may NEVER touch these paths without the full chain. Escalate-only:
+# the server upgrades lite -> risk on evidence, it never downgrades.
+DEFAULT_RISK_GLOBS = [".github/**", "**/Dockerfile", "deploy/**", "**/deploy/**", "**/*.pem", "**/*.key"]
+DEFAULT_LITE_MAX_FILES = 3
 def _ensure_audit():
     ensure_audit_dir()
 
@@ -393,10 +403,14 @@ _REPORT = {
             ("scope", "Soát phạm vi thay đổi"),
         ],
         "blocked": "⛔ BỊ CHẶN — chưa được phép làm việc",
-        "preparing": "🟡 ĐANG CHUẨN BỊ",
-        "ready": "🟢 SẴN SÀNG LÀM VIỆC",
+        "planning": "🟡 ĐANG LÀM — theo kế hoạch",
+        "needs_approval": "🖐 CHỜ DUYỆT — cần anh gật đầu trước bước rủi ro",
         "done": "✅ XONG — CÓ BẰNG CHỨNG",
         "task": "Nhiệm vụ",
+        "lane": "Làn",
+        "lane_lite": "nhẹ (preflight + bằng chứng)",
+        "lane_risk": "rủi ro (đủ chuỗi kiểm)",
+        "approval_hint": "Duyệt xong thì ghi 'approved' vào session_log để mở khoá.",
         "place": "Nơi làm việc",
         "lease": "Quyền làm việc: phiên này đang giữ nhiệm vụ — không phiên nào khác chen vào được.",
         "why": "Lý do",
@@ -417,10 +431,14 @@ _REPORT = {
             ("scope", "Change-scope audit"),
         ],
         "blocked": "⛔ BLOCKED — not cleared to work",
-        "preparing": "🟡 PREPARING",
-        "ready": "🟢 READY TO WORK",
+        "planning": "🟡 PLANNING — work in progress",
+        "needs_approval": "🖐 NEEDS APPROVAL — waiting for a human before a risky step",
         "done": "✅ DONE — WITH PROOF",
         "task": "Task",
+        "lane": "Lane",
+        "lane_lite": "lite (preflight + evidence)",
+        "lane_risk": "risk (full chain)",
+        "approval_hint": "After approving, log 'approved' via session_log to unblock.",
         "place": "Working in",
         "lease": "Work lock: this session holds the task — no other session can cut in.",
         "why": "Why",
@@ -450,22 +468,28 @@ def _status_report(lang=None):
     }
     pf = _state.get("last_preflight") or {}
     lines = []
+    # Wave2 canonical states (2026-07-14): Planning / Needs approval / Blocked / Done.
     if not flags["preflight"]:
-        header = t["blocked"] if pf else t["preparing"]
+        header = t["blocked"] if pf else t["planning"]
+    elif _state.get("approval_pending"):
+        header = t["needs_approval"]
     elif all(flags.values()):
         header = t["done"]
-    elif flags["contract"]:
-        header = t["ready"]
     else:
-        header = t["preparing"]
+        header = t["planning"]
     lines.append(header)
     lines.append("")
     if _state.get("bound_task"):
         lines.append(f"{t['task']}: {_state['bound_task']}")
     if pf.get("repo") and pf.get("branch"):
         lines.append(f"{t['place']}: {pf.get('repo')} @ {pf.get('branch')}")
+    if flags["preflight"]:
+        lane_key = "lane_lite" if _state.get("bound_lane") == "lite" else "lane_risk"
+        lines.append(f"{t['lane']}: {t[lane_key]}")
     if _state.get("lease_task"):
         lines.append(t["lease"])
+    if _state.get("approval_pending"):
+        lines.append(t["approval_hint"])
     lines.append("")
     for key, label in t["steps"]:
         mark = "✔" if flags[key] else "✘"
@@ -565,7 +589,8 @@ def _call(rid,p):
             _state.update({"contract_ok": False, "last_verify_status": None,
                            "contract_scope_parsed": None, "scope_audit_ok": False,
                            "scope_audit_task": None, "scope_audit_cwd": None,
-                           "scope_audit_sig": None, "contract_dod_cmd": None})
+                           "scope_audit_sig": None, "contract_dod_cmd": None,
+                           "approval_pending": False})
             r=_run_preflight(a.get("cwd"),a.get("task"),a.get("bootstrap"))
             _state["preflight_ok"]=r.get("status")=="clear" and r.get("exit_code")==0
             _state["last_preflight"]=r
@@ -573,10 +598,21 @@ def _call(rid,p):
                 _state["bound_workspace"] = r.get("workspace")
                 _state["bound_cwd"] = os.path.realpath(a.get("cwd") or os.getcwd())
                 _state["bound_task"] = r.get("task")
+                # GO-RISK-LANE (CAUSAL-VERDICT 2026-07-16, preregistered rule):
+                # full chain is mandatory only for the risk lane; the lite lane
+                # (preflight + evidence) exists because the +35% gate tax on
+                # routine work is exactly why gates get bypassed. Lite is
+                # OPT-IN via policy AND caller, and only ever escalates.
+                lane = "risk"
+                if a.get("lane") == "lite" and _workspace_policy().get("lanes_enabled"):
+                    lane = "lite"
+                _state["bound_lane"] = lane
+                r["lane"] = lane
             else:
                 _state["bound_workspace"] = None
                 _state["bound_cwd"] = None
                 _state["bound_task"] = None
+                _state["bound_lane"] = "risk"
             # C2: exclusive task lease — a second live session on the same
             # (repo, task) is refused BEFORE any gate opens. Fail closed.
             if _state["preflight_ok"]:
@@ -692,12 +728,67 @@ def _call(rid,p):
             _audit({"event":"audit_scope","ok":r["ok"],"git_files":git_files})
             return _tool_ok(rid,r)
         if n=="session_log":
-            _audit({"event":a.get("event"),"data":a.get("data") or {}}); return _tool_ok(rid,{"ok":True})
+            ev = a.get("event")
+            # Human-in-the-loop marker (wave2 state "Needs approval"): the agent
+            # logs needs_approval before a risky step; an explicit approval or a
+            # closed evidence clears it. status_report surfaces it first.
+            if ev == "needs_approval":
+                _state["approval_pending"] = True
+            elif ev in ("approved", "approval_granted"):
+                _state["approval_pending"] = False
+            _audit({"event":ev,"data":a.get("data") or {}}); return _tool_ok(rid,{"ok":True})
         if n=="status_report":
             # Deliberately NOT gated: a blocked operator most needs to see why.
             return _tool_ok(rid,None,text=_status_report(a.get("lang")))
         if n=="post_evidence":
             if not _state["preflight_ok"]: return _tool_err(rid,-32000,*_FIX_PREFLIGHT)
+            if _state.get("bound_lane") == "lite":
+                # Lite lane (preregistered GO-RISK-LANE): preflight + evidence.
+                # Fail closed: the server re-derives the git inventory and
+                # ESCALATES to risk on multi-file or risky paths — a worker
+                # cannot talk its way into lite for risky work.
+                lite_cwd = _state.get("bound_cwd") or os.getcwd()
+                try:
+                    lite_files = _git_inventory(lite_cwd)
+                except Exception as e:
+                    return _tool_err(rid,-32012,f"lite lane requires readable git state ({e})",
+                                     "Run from the preflighted git repository, or use the full "
+                                     "chain (check_contract -> verify_gate -> audit_scope).")
+                policy=_workspace_policy()
+                try:
+                    max_files=int(policy.get("lite_max_files", DEFAULT_LITE_MAX_FILES))
+                except (TypeError, ValueError):
+                    max_files=DEFAULT_LITE_MAX_FILES
+                globs=policy.get("risk_globs") or DEFAULT_RISK_GLOBS
+                hits=[f for f in lite_files if any(fnmatch.fnmatch(f,g) for g in globs)]
+                if len(lite_files)>max_files or hits:
+                    reason=(f"risk paths touched: {', '.join(hits[:3])}" if hits
+                            else f"{len(lite_files)} files changed (lite max {max_files})")
+                    return _tool_err(rid,-32012,f"Lane escalated to RISK — {reason}",
+                                     "This work is not lite. Run the full chain: check_contract, "
+                                     "verify_gate, audit_scope, then post_evidence.")
+                if _state["bound_task"] and a.get("task_gid") and a["task_gid"] != _state["bound_task"]:
+                    return _tool_err(rid,-32004,
+                                     f"task_gid '{a['task_gid']}' does not match preflighted task "
+                                     f"'{_state['bound_task']}'",
+                                     f"Post evidence for '{_state['bound_task']}', or re-run "
+                                     f"preflight with the task you mean to close.")
+                resolution="Done" if a.get("exit_code",-1)==0 else "Blocked"
+                _state["approval_pending"] = False
+                _audit({"event":"post_evidence","task_gid":a["task_gid"],"summary":a.get("summary"),
+                        "resolution":resolution,"exit_code":a.get("exit_code"),"lane":"lite",
+                        "files":lite_files,"artifacts":a.get("artifacts",[]),
+                        "references":a.get("references",[]),"duration_s":a.get("duration_s")})
+                write_decision({"session":SESSION_ID,"decision":"post_evidence","task":a["task_gid"],
+                                "resolution":resolution,"exit_code":a.get("exit_code"),"lane":"lite"})
+                result={"ok":True,"resolution":resolution,"lane":"lite",
+                        "message":"Evidence logged (lite lane: preflight + evidence). "
+                                  "Risky or multi-file work auto-escalates to the full chain."}
+                tracker=_post_tracker(a["task_gid"],a.get("summary"),resolution,a.get("exit_code",-1),
+                                      a.get("artifacts",[]),a.get("references",[]),a.get("duration_s"))
+                if tracker is not None:
+                    result["tracker"]=tracker
+                return _tool_ok(rid,result)
             if not _state["contract_ok"]: return _tool_err(rid,-32001,*_FIX_CONTRACT)
             if _state["last_verify_status"] != "passed":
                 return _tool_err(rid,-32002,"A passing verify_gate is required before post_evidence",
@@ -732,6 +823,7 @@ def _call(rid,p):
                 return _tool_err(rid,-32009,"git state changed since scope audit; re-run audit_scope",
                                  "Files changed after the audit. Call audit_scope again, then retry post_evidence.")
             resolution="Done" if a.get("exit_code",-1)==0 else "Blocked"
+            _state["approval_pending"] = False
             # Local audit is UNCONDITIONAL and the source of truth.
             _audit({"event":"post_evidence","task_gid":a["task_gid"],"summary":a.get("summary"),
                     "resolution":resolution,"exit_code":a.get("exit_code"),

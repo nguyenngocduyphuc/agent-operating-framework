@@ -23,6 +23,13 @@ claude mcp add aof -- aof start-mcp-server
 
 Idempotent -- safe to re-run. The tool stays in your PATH; the project keeps only config.
 
+## Measured results (3-arm causal benchmark, n=105 runs, preregistered rule)
+
+- **Scope containment: 100% of out-of-scope requests blocked vs 43% bare** (p<0.05, Fisher one-sided, replicated across two independent measurements).
+- Task pass rate +11.6pp and fabrication −11.6pp vs bare — consistent direction across both measurements, not individually significant at this n.
+- **Cost: ~+35% wall time on gated tasks.** That tax is why lanes exist: the full chain is mandatory only on the risk lane (deploy / publish / multi-file / data-write); routine work can run the lite lane (preflight + evidence) with automatic escalation.
+- Measured on one backend; cross-worker generalization not yet measured.
+
 ## Features
 
 - **Preflight gate** -- detects workspace, repo, branch, and credential gaps before work starts. Exit 0 = ready, exit 2 = fix first.

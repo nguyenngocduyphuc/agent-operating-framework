@@ -39,6 +39,22 @@
 - `docs/OPERATOR_WORKFLOW_VI.md`: the 5-step daily operating loop and the
   measured operational value table.
 
+- **Lanes (GO-RISK-LANE, preregistered causal verdict 2026-07-16)**: the full
+  chain is mandatory only on the risk lane; routine work can run lite
+  (preflight + evidence). Lite is opt-in TWICE (policy `lanes_enabled` AND
+  `preflight lane:"lite"`) and escalate-only: the server re-derives the git
+  inventory at post_evidence and refuses lite when more than `lite_max_files`
+  (default 3) changed or any `risk_globs` path was touched. A worker cannot
+  talk its way into lite for risky work.
+- **Wave2 canonical states in `status_report`**: Planning / Needs approval /
+  Blocked / Done. `session_log` event `needs_approval` raises the
+  human-in-the-loop state; `approved` or a closed evidence clears it.
+- README now carries the measured claims within their preregistered honesty
+  bounds: scope-block 100% vs 43% (p<0.05, replicated), pass/fabrication
+  directional, +35% wall-time cost stated up front.
+- `docs/REWIRE_MAP_AOF_SKILL.md`: strangler map for rewiring the live `/aof`
+  skill to this core without losing any of its ~15 daily operations.
+
 ### Fixed
 
 - Test suite no longer inherits the enclosing host workspace's `.aof_policy.json`

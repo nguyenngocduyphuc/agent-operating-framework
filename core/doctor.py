@@ -89,6 +89,11 @@ _DEFAULT_POLICY = {
     "require_contract": True,
     "require_evidence": True,
     "require_handoff": True,
+    # Karpathy mode ON by default: the AGENT (not the human) must show auditable
+    # thinking — real Assumptions, a runnable DoD-cmd, a bounded Scope — before
+    # any work. No-code operators never write contracts themselves, so this
+    # costs them nothing and buys machine-checked thinking on every task.
+    "require_karpathy": True,
     "allow_bootstrap_without_task": True,
     "expected_repository": "",
     "report_language": "vi",

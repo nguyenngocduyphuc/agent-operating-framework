@@ -55,6 +55,18 @@
 - `docs/REWIRE_MAP_AOF_SKILL.md`: strangler map for rewiring the live `/aof`
   skill to this core without losing any of its ~15 daily operations.
 
+- **`aof recap`**: self-contained HTML session recap (no JS, no external assets,
+  HTML-escaped) written to `docs/sessions/RECAP_<ts>.html` — per-session docs
+  that update themselves. Blocked closures render as loudly as Done.
+- **`aof handoff`**: markdown handoff to `docs/sessions/HANDOFF_<ts>.md` with
+  Done / Blocked / Open sections and a 3-line "next session reads first" list.
+- **Karpathy mode ON by default** in `aof init` policy: every contract must
+  carry real Assumptions, a runnable `DoD-cmd` (re-executed by the `dod` gate),
+  and a bounded Scope. The agent pays the thinking tax, never the operator.
+- `docs/VONG_LAP_NO_CODE_VI.md`: the 9-step no-code loop — one prompt in, plan →
+  decompose → delegate → controlled execution → conditional acceptance →
+  verify → evidence → handoff → HTML recap, with per-step acceptance conditions.
+
 ### Fixed
 
 - Test suite no longer inherits the enclosing host workspace's `.aof_policy.json`

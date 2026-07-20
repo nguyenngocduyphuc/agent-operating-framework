@@ -13,6 +13,8 @@ prominence as successes — a ledger that hides failures is a false report.
 from __future__ import annotations
 
 import json
+import os
+import time
 from datetime import datetime
 from typing import Any
 
@@ -140,6 +142,179 @@ def _fmt_ts(ts: float) -> str:
         return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
     except (OverflowError, OSError, ValueError):
         return "?"
+
+
+_HTML_T = {
+    "vi": {
+        "title": "Recap phiên AOF",
+        "since": "Từ",
+        "made": "Tạo lúc",
+        "cards": [("sessions", "Phiên"), ("done", "Xong có bằng chứng"),
+                  ("blocked", "Đóng dạng bị chặn"), ("collisions", "Va chạm khoá (đã chặn)"),
+                  ("gate_fail", "Kiểm chứng trượt")],
+        "per_task": "Theo nhiệm vụ",
+        "contract": "hợp đồng",
+        "verify": "kiểm chứng",
+        "ok": "đạt",
+        "fail": "trượt",
+        "task_none": "(chưa gắn nhiệm vụ)",
+        "no_activity": "Không có hoạt động trong khoảng này.",
+        "honest": "Số liệu in nguyên từ sổ cưỡng chế — kể cả thất bại. Không tô hồng.",
+    },
+    "en": {
+        "title": "AOF Session Recap",
+        "since": "Since",
+        "made": "Generated",
+        "cards": [("sessions", "Sessions"), ("done", "Done with proof"),
+                  ("blocked", "Closed as blocked"), ("collisions", "Lock collisions (refused)"),
+                  ("gate_fail", "Failed verifications")],
+        "per_task": "Per task",
+        "contract": "contract",
+        "verify": "verify",
+        "ok": "pass",
+        "fail": "fail",
+        "task_none": "(no task bound)",
+        "no_activity": "No activity in this window.",
+        "honest": "Numbers come straight from the enforcement ledger — failures included. No polish.",
+    },
+}
+
+
+def render_html(report: dict[str, Any], lang: str | None = None) -> str:
+    """Self-contained recap HTML. One file, inline CSS, opens anywhere.
+
+    ponytail: no JS, no framework, no external assets — a recap must still
+    open in ten years from a USB stick.
+    """
+    t = _HTML_T[lang if lang in ("vi", "en") else "vi"]
+
+    def esc(s: object) -> str:
+        return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+    cards = "".join(
+        f'<div class="card"><div class="num">{report[key]}</div>'
+        f'<div class="lbl">{esc(label)}</div></div>'
+        for key, label in t["cards"]
+    )
+    rows = []
+    for name, b in sorted(report["tasks"].items()):
+        label = esc(name) if name else t["task_none"]
+        res = " ".join(
+            ("✔" if r == "Done" else "⛔") + f" {_fmt_ts(ts)}" for ts, r in b["resolutions"]
+        ) or "—"
+        rows.append(
+            f"<tr><td>{label}</td>"
+            f"<td>{b['contract_ok']}✔ / {b['contract_fail']}✘</td>"
+            f"<td>{b['verify_pass']} {t['ok']} / {b['verify_fail']} {t['fail']}</td>"
+            f"<td>{res}</td></tr>"
+        )
+    body_tasks = (
+        f"<h2>{t['per_task']}</h2><table><tr><th></th><th>{t['contract']}</th>"
+        f"<th>{t['verify']}</th><th>Evidence</th></tr>{''.join(rows)}</table>"
+        if rows else f"<p>{t['no_activity']}</p>"
+    )
+    return f"""<!DOCTYPE html>
+<html lang="{lang or 'vi'}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{t['title']}</title>
+<style>
+ body{{font-family:-apple-system,'Segoe UI',sans-serif;max-width:760px;margin:2rem auto;
+      padding:0 1rem;color:#1a1a2e;background:#fafafa}}
+ h1{{font-size:1.4rem}} h2{{font-size:1.1rem;margin-top:1.6rem}}
+ .meta{{color:#666;font-size:.9rem}}
+ .cards{{display:flex;gap:.6rem;flex-wrap:wrap;margin:1rem 0}}
+ .card{{background:#fff;border:1px solid #e2e2ea;border-radius:10px;padding:.8rem 1rem;
+       min-width:104px;text-align:center}}
+ .num{{font-size:1.6rem;font-weight:700}} .lbl{{font-size:.78rem;color:#555}}
+ table{{border-collapse:collapse;width:100%;background:#fff}}
+ th,td{{border:1px solid #e2e2ea;padding:.45rem .6rem;font-size:.9rem;text-align:left}}
+ th{{background:#f1f1f6}}
+ .honest{{margin-top:1.4rem;font-size:.82rem;color:#777;border-top:1px solid #e2e2ea;
+         padding-top:.6rem}}
+</style></head><body>
+<h1>{t['title']}</h1>
+<p class="meta">{t['since']}: {_fmt_ts(report['since_ts'])} · {t['made']}: {_fmt_ts(time.time())}</p>
+<div class="cards">{cards}</div>
+{body_tasks}
+<p class="honest">{t['honest']}</p>
+</body></html>
+"""
+
+
+_HANDOFF_T = {
+    "vi": {
+        "title": "# BÀN GIAO PHIÊN (HANDOFF)",
+        "window": "Cửa sổ",
+        "done": "## Đã xong — có bằng chứng",
+        "blocked": "## Đóng dạng bị chặn (phiên sau xử tiếp)",
+        "open_": "## Đang mở (có hợp đồng/kiểm chứng nhưng chưa chốt evidence)",
+        "collisions": "Va chạm khoá nhiệm vụ trong cửa sổ",
+        "none": "(không có)",
+        "next": "## Phiên sau đọc trước",
+        "next_items": [
+            "Chạy `aof doctor` xác nhận môi trường trước khi làm.",
+            "Đọc mục 'Đang mở' — mỗi dòng là một nhiệm vụ chưa chốt, preflight đúng task đó để nhận khoá.",
+            "Không tin recap này thay bằng chứng: mọi số đối chiếu được bằng `aof log`.",
+        ],
+    },
+    "en": {
+        "title": "# SESSION HANDOFF",
+        "window": "Window",
+        "done": "## Done — with proof",
+        "blocked": "## Closed as blocked (next session continues)",
+        "open_": "## Open (contract/verify activity but no evidence yet)",
+        "collisions": "Task-lock collisions in window",
+        "none": "(none)",
+        "next": "## Next session, read first",
+        "next_items": [
+            "Run `aof doctor` before working.",
+            "Each 'Open' line is an unclosed task — preflight that task to take its lease.",
+            "Do not trust this recap over evidence: every number is checkable via `aof log`.",
+        ],
+    },
+}
+
+
+def format_handoff(report: dict[str, Any], lang: str | None = None) -> str:
+    """Markdown handoff a NEXT session (human or agent) can act on directly."""
+    t = _HANDOFF_T[lang if lang in ("vi", "en") else "vi"]
+    done_lines, blocked_lines, open_lines = [], [], []
+    for name, b in sorted(report["tasks"].items()):
+        label = name or t["none"]
+        resolved = {r for _, r in b["resolutions"]}
+        line = (f"- {label} — {t_contract(b)} · verify {b['verify_pass']}✔/{b['verify_fail']}✘")
+        if "Done" in resolved:
+            done_lines.append(line)
+        elif "Blocked" in resolved:
+            blocked_lines.append(line)
+        else:
+            open_lines.append(line)
+    out = [
+        t["title"],
+        "",
+        f"{t['window']}: {_fmt_ts(report['since_ts'])} → {_fmt_ts(time.time())}"
+        f" · {t['collisions']}: {report['collisions']}",
+        "",
+        t["done"], *(done_lines or [t["none"]]),
+        "",
+        t["blocked"], *(blocked_lines or [t["none"]]),
+        "",
+        t["open_"], *(open_lines or [t["none"]]),
+        "",
+        t["next"],
+        *(f"{i+1}. {x}" for i, x in enumerate(t["next_items"])),
+        "",
+    ]
+    return "\n".join(out)
+
+
+def t_contract(b: dict[str, Any]) -> str:
+    return f"contract {b['contract_ok']}✔/{b['contract_fail']}✘"
+
+
+def default_session_dir(base: str) -> str:
+    """docs/sessions/ under the workspace — the per-session docs home."""
+    return os.path.join(base, "docs", "sessions")
 
 
 def format_digest(report: dict[str, Any], lang: str | None = None) -> str:

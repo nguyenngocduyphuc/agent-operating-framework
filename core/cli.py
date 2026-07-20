@@ -40,6 +40,16 @@ def main() -> None:
     p_log.add_argument("--lang", choices=["vi", "en"], default=None)
     p_log.add_argument("--json", action="store_true", dest="as_json")
 
+    p_recap = sub.add_parser("recap", help="Write a self-contained HTML session recap into docs/sessions/.")
+    p_recap.add_argument("--since-hours", type=float, default=None)
+    p_recap.add_argument("--out", default=None, help="output file (default docs/sessions/RECAP_<ts>.html)")
+    p_recap.add_argument("--lang", choices=["vi", "en"], default=None)
+
+    p_handoff = sub.add_parser("handoff", help="Write a markdown session handoff into docs/sessions/.")
+    p_handoff.add_argument("--since-hours", type=float, default=None)
+    p_handoff.add_argument("--out", default=None, help="output file (default docs/sessions/HANDOFF_<ts>.md)")
+    p_handoff.add_argument("--lang", choices=["vi", "en"], default=None)
+
     p_watch = sub.add_parser("watch", help="Judge a worker by its OUTPUT file mtime/size, not its session.")
     p_watch.add_argument("file")
     p_watch.add_argument("--stale-after", type=int, default=None,
@@ -70,6 +80,32 @@ def main() -> None:
         report = build_digest(since_ts=since, task=args.task)
         print(json.dumps(report, ensure_ascii=False, indent=2) if args.as_json
               else format_digest(report, args.lang))
+        sys.exit(0)
+    elif args.command in ("recap", "handoff"):
+        import os
+        import time as _time
+        from datetime import datetime
+
+        from core.oplog import (
+            build_digest,
+            default_session_dir,
+            format_handoff,
+            render_html,
+        )
+        since = (_time.time() - args.since_hours * 3600) if args.since_hours else None
+        report = build_digest(since_ts=since)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        if args.command == "recap":
+            content = render_html(report, args.lang)
+            default_name = f"RECAP_{stamp}.html"
+        else:
+            content = format_handoff(report, args.lang)
+            default_name = f"HANDOFF_{stamp}.md"
+        out = args.out or os.path.join(default_session_dir(os.getcwd()), default_name)
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        print(out)
         sys.exit(0)
     elif args.command == "watch":
         from core.heartbeat import DEFAULT_STALE_AFTER_S, check, format_check

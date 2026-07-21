@@ -1,15 +1,16 @@
 # AOF CI — ruff + pytest matrix (matches local quality bar).
-# Runs on push/PR when product paths change.
 
 name: AOF
 
 on:
   push:
+    branches: ['**']
     paths:
       - 'core/**'
       - 'adapters/**'
       - 'examples/**'
       - 'tests/**'
+      - 'scripts/**'
       - 'pyproject.toml'
       - 'README.md'
       - '.github/workflows/aof.yml'
@@ -19,13 +20,14 @@ on:
       - 'adapters/**'
       - 'examples/**'
       - 'tests/**'
+      - 'scripts/**'
       - 'pyproject.toml'
       - 'README.md'
       - '.github/workflows/aof.yml'
 
 jobs:
   quality:
-    name: ruff + pytest
+    name: ruff-pytest
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -38,40 +40,17 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install tools
         run: python -m pip install --upgrade pip ruff pytest
-      - name: Lint (same scope as local: core/ + tests/)
+      - name: Lint
         run: ruff check core/ tests/
       - name: Tests
         run: python -m pytest tests/ -q
-      - name: MCP tools/list smoke
+      - name: MCP tools list smoke
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python - <<'PY'
-          import json, subprocess, sys
-          reqs = [
-            {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}},
-            {"jsonrpc":"2.0","method":"notifications/initialized"},
-            {"jsonrpc":"2.0","id":2,"method":"tools/list"},
-          ]
-          payload = "\n".join(json.dumps(r) for r in reqs) + "\n"
-          p = subprocess.run([sys.executable, "-m", "core.mcp_server"], input=payload, text=True, capture_output=True, timeout=30)
-          assert p.returncode == 0, p.stderr
-          from core.mcp_server import TOOLS
-          names = None
-          for line in p.stdout.splitlines():
-              try:
-                  o = json.loads(line)
-              except json.JSONDecodeError:
-                  continue
-              if o.get("id") == 2:
-                  names = [t["name"] for t in o["result"]["tools"]]
-          assert names is not None, p.stdout
-          assert len(names) == len(TOOLS), (len(names), len(TOOLS), names)
-          print("tools", len(names), names)
-          PY
+        run: python scripts/ci_tools_list_smoke.py
 
   demo:
-    name: Demo smoke
+    name: demo-smoke
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -81,5 +60,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Full-flow demo (dry)
+      - name: Full-flow demo dry
         run: python examples/full_flow_demo.py

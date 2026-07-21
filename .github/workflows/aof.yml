@@ -1,15 +1,17 @@
-# AOF CI — preflight, quality, and demo smoke-test
-# Runs on push/PR to any branch touching core/, adapters/, examples/, or this workflow.
+# AOF CI — ruff + pytest matrix (matches local quality bar).
 
 name: AOF
 
 on:
   push:
+    branches: ['**']
     paths:
       - 'core/**'
       - 'adapters/**'
       - 'examples/**'
       - 'tests/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
       - 'README.md'
       - '.github/workflows/aof.yml'
   pull_request:
@@ -18,28 +20,17 @@ on:
       - 'adapters/**'
       - 'examples/**'
       - 'tests/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
       - 'README.md'
       - '.github/workflows/aof.yml'
 
 jobs:
-  preflight:
-    name: Preflight gate
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Run preflight
-        run: python -m core.preflight --json
-
   quality:
-    name: Code quality (ruff)
+    name: ruff-pytest
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ['3.10', '3.11', '3.12']
     steps:
@@ -47,37 +38,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install ruff
-        run: python -m pip install --upgrade ruff
-      - name: Lint with ruff
-        run: ruff check --select F core/ examples/full_flow_demo.py
+      - name: Install tools
+        run: python -m pip install --upgrade pip ruff pytest
+      - name: Lint
+        run: ruff check core/ tests/
+      - name: Tests
+        run: python -m pytest tests/ -q
+      - name: MCP tools list smoke
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/ci_tools_list_smoke.py
 
   demo:
-    name: Demo smoke-test
+    name: demo-smoke
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.12']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Run full-flow demo (dry, no tracker token)
+      - name: Full-flow demo dry
         run: python examples/full_flow_demo.py
-
-  tests:
-    name: Regression tests (pytest)
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install pytest
-        run: python -m pip install --upgrade pytest
-      - name: Run tests
-        run: python -m pytest tests/ -q

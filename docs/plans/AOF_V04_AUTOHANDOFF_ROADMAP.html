@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AOF v0.4 — Interactive Roadmap</title>
+<style>
+:root{
+  --font-sans:-apple-system,'Segoe UI',sans-serif;
+  --color-background-primary:#ffffff;
+  --color-background-secondary:#f4f4f8;
+  --color-background-success:#e8f7ee; --color-border-success:#1e7e42; --color-text-success:#1e7e42;
+  --color-background-warning:#fff8e1; --color-border-warning:#b8860b; --color-text-warning:#8a6100;
+  --color-background-danger:#fdecea; --color-border-danger:#c0392b; --color-text-danger:#c0392b;
+  --color-text-primary:#1a1a2e; --color-text-secondary:#55555f; --color-text-tertiary:#8a8a95;
+  --color-border-tertiary:#e2e2ea;
+  --border-radius-md:8px; --border-radius-lg:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#fafafa;color:var(--color-text-primary);font-family:var(--font-sans);max-width:920px;margin:0 auto;padding:1.5rem 1rem}
+.rmap{padding:1.5rem 0;font-family:var(--font-sans)}
+h1{font-size:1.4rem} .meta{color:var(--color-text-secondary);font-size:.88rem;margin:.3rem 0 1rem}
+.header-kpi{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:2rem}
+.kpi-card{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:12px 14px;cursor:pointer;transition:background .15s}
+.kpi-card:hover{background:#ececf4}
+.kpi-label{font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px}
+.kpi-now{font-size:22px;font-weight:600} .kpi-target{font-size:12px;color:var(--color-text-secondary);margin-top:2px}
+.kpi-bar-bg{height:3px;background:var(--color-border-tertiary);border-radius:2px;margin-top:10px}
+.kpi-bar-fill{height:3px;border-radius:2px} .kpi-delta{font-size:11px;margin-top:5px;font-weight:600}
+.section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--color-text-tertiary);margin:1.5rem 0 .75rem}
+.timeline{display:grid;grid-template-columns:110px 1fr 1fr 1fr;border-radius:var(--border-radius-lg);overflow:hidden;border:0.5px solid var(--color-border-tertiary)}
+.tl-head{background:var(--color-background-secondary);padding:10px 14px;font-size:11px;font-weight:600;color:var(--color-text-secondary);letter-spacing:.05em;border-bottom:0.5px solid var(--color-border-tertiary)}
+.tl-head:not(:last-child){border-right:0.5px solid var(--color-border-tertiary)}
+.tl-row-label{padding:14px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;gap:4px;border-right:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary)}
+.tl-pillar-name{font-size:12px;font-weight:600} .tl-pillar-score{font-size:11px} .tl-pillar-weight{font-size:10px;color:var(--color-text-tertiary)}
+.tl-cell{padding:12px 14px;border-bottom:0.5px solid var(--color-border-tertiary);border-right:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);display:flex;flex-direction:column;gap:7px}
+.tl-cell:last-child{border-right:none}
+.task{display:flex;align-items:flex-start;gap:7px;cursor:pointer;border-radius:6px;padding:6px 8px;transition:background .15s}
+.task:hover{background:var(--color-background-secondary)}
+.task-dot{width:7px;height:7px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.task-text{font-size:12px;color:var(--color-text-primary);line-height:1.5}
+.task-sub{font-size:11px;color:var(--color-text-tertiary);margin-top:2px}
+.milestone-row{grid-column:1/-1;background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border-tertiary);padding:8px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ms-chip{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;display:inline-flex;align-items:center;gap:5px}
+.ms-label{font-size:11px;color:var(--color-text-secondary)}
+.maturity-bar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:1rem 0}
+.mat-step{border-radius:var(--border-radius-md);padding:10px 12px;border:0.5px solid var(--color-border-tertiary);cursor:pointer}
+.mat-step.done{background:var(--color-background-success);border-color:var(--color-border-success)}
+.mat-step.active{background:var(--color-background-warning);border-color:var(--color-border-warning)}
+.mat-step.planned{background:var(--color-background-secondary)}
+.mat-num{font-size:16px;font-weight:700} .mat-name{font-size:11px;font-weight:600;margin:2px 0} .mat-desc{font-size:10px;color:var(--color-text-tertiary);line-height:1.4}
+.gap-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:1rem 0}
+.gap-card{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:12px 14px;cursor:pointer;transition:background .15s}
+.gap-card:hover{background:var(--color-background-secondary)}
+.gap-title{font-size:12px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.gap-item{font-size:11px;color:var(--color-text-secondary);padding:3px 0;display:flex;align-items:flex-start;gap:6px;line-height:1.4}
+.gap-item::before{content:"->";color:var(--color-text-tertiary);flex-shrink:0}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin:.75rem 0 1.5rem}
+.leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--color-text-secondary)}
+.leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.honest{margin-top:1.6rem;font-size:.82rem;color:#777;border-top:1px solid var(--color-border-tertiary);padding-top:.6rem}
+.blocker{background:var(--color-background-danger);border-left:4px solid var(--color-border-danger);border-radius:8px;padding:.8rem 1rem;margin-bottom:1.2rem;font-size:.85rem}
+</style></head>
+<body>
+<div class="rmap">
+<h1>AOF v0.4 — Interactive Roadmap (auto-handoff · error ledger · worker control)</h1>
+<p class="meta">Nguồn: docs/plans/AOF_V04_AUTOHANDOFF_EXECPLAN_20260721.md (f47a0e9) · Master Context: AOF_V04_AUTOHANDOFF_CONTEXT.md · Baseline: 2026-07-21 06:58 · Nhánh: feat/aof-v03-nocode-ops</p>
+
+<div class="blocker"><b>Blocker sống:</b> .git/index.lock đang chặn commit F2 (rm trả về "Operation not permitted", không phải stale lock thường) — chờ CEO kiểm tra máy thật. Xem PHẦN 3 trong Master Context.</div>
+
+<div class="section-title">Baseline 2026-07-21</div>
+<!-- STALE as of 2026-07-21 evening: F1-1/F1-2/F1-3/F2 shipped in code; F1-1 must use nearest_repo not repo_identity. Regenerate via unified-roadmap-architect. See docs/ARCHITECTURE.md + AOF_V04_AUTOHANDOFF_CONTEXT.md. -->
+<p style="background:#5C1A1A;color:#fff;padding:12px 16px;border-radius:8px;font-weight:600">
+  STALE ROADMAP — do not execute COPY PROMPTs from this HTML for F1-1 (repo_identity write base is wrong).
+  Use docs/ARCHITECTURE.md + CONTEXT.md status. Regenerate after F3.
+</p>
+<div class="header-kpi">
+<div class="kpi-card" onclick="sendPrompt('TESTS baseline 134/134 pass (trước F2 = 132). Chạy python3.10 -m pytest -q trong vendors/agent-operating-framework, báo số mới nếu lệch.')">
+  <div class="kpi-label">TESTS</div>
+  <div class="kpi-now" style="color:var(--color-text-success)">134</div>
+  <div class="kpi-target">Target: 0 fail &nbsp;-&nbsp; weight 25%</div>
+  <div class="kpi-bar-bg"><div class="kpi-bar-fill" style="width:100%;background:var(--color-border-success)"></div></div>
+  <div class="kpi-delta" style="color:var(--color-text-success)">+2 so với baseline (F2)</div>
+</div>
+<div class="kpi-card" onclick="sendPrompt('RUFF baseline PASS. Chạy python3.10 -m ruff check core/ tests/ trong vendors/agent-operating-framework, báo issue nếu có.')">
+  <div class="kpi-label">RUFF</div>
+  <div class="kpi-now" style="color:var(--color-text-success)">0 issue</div>
+  <div class="kpi-target">Target: 0 issue &nbsp;-&nbsp; weight 25%</div>
+  <div class="kpi-bar-bg"><div class="kpi-bar-fill" style="width:100%;background:var(--color-border-success)"></div></div>
+  <div class="kpi-delta" style="color:var(--color-text-success)">PASS</div>
+</div>
+<div class="kpi-card" onclick="sendPrompt('TOOLS gap -1: đếm TOOLS catalog trong core/mcp_server.py dòng 49-104, hiện 12, target 13 sau khi F1-3 thêm aof_resume.')">
+  <div class="kpi-label">TOOLS</div>
+  <div class="kpi-now" style="color:var(--color-text-warning)">12</div>
+  <div class="kpi-target">Target: 13 &nbsp;-&nbsp; weight 25%</div>
+  <div class="kpi-bar-bg"><div class="kpi-bar-fill" style="width:92%;background:var(--color-border-warning)"></div></div>
+  <div class="kpi-delta" style="color:var(--color-text-warning)">Gap -1</div>
+</div>
+<div class="kpi-card" onclick="sendPrompt('FEATURES 1/5 Done: F2 xong. Đọc docs/plans/AOF_V04_AUTOHANDOFF_CONTEXT.md PHẦN 5 để lấy prompt task F1-1 tiếp theo.')">
+  <div class="kpi-label">FEATURES</div>
+  <div class="kpi-now" style="color:var(--color-text-danger)">1/5</div>
+  <div class="kpi-target">Target: 5/5 &nbsp;-&nbsp; weight 25%</div>
+  <div class="kpi-bar-bg"><div class="kpi-bar-fill" style="width:20%;background:var(--color-border-danger)"></div></div>
+  <div class="kpi-delta" style="color:var(--color-text-danger)">Gap -4</div>
+</div>
+</div>
+
+<div class="section-title">Maturity level — L3 hiện tại (đang làm), đích L4</div>
+<div class="maturity-bar">
+<div class="mat-step done" onclick="sendPrompt('L1 v0.3 nội bộ: đã DONE, xem docs/history/INDEX.md dòng v0.3.3.')">
+  <div class="mat-num">L1</div><div class="mat-name">v0.3 nội bộ</div><div class="mat-desc">lease+policy+status_report</div></div>
+<div class="mat-step done" onclick="sendPrompt('L2 v0.3.4 sync 2 môi trường: đã DONE, xem core/mcp_server.py 12 tool host-side.')">
+  <div class="mat-num">L2</div><div class="mat-name">v0.3.4 sync</div><div class="mat-desc">Cowork = Claude Code</div></div>
+<div class="mat-step active" onclick="sendPrompt('L2→L3 checklist: F2 done (134 test), F1/F3/F4/F5 TODO. Đọc docs/plans/AOF_V04_AUTOHANDOFF_CONTEXT.md PHẦN 3, cái nào chưa done?')">
+  <div class="mat-num">L3</div><div class="mat-name">v0.4 auto-handoff</div><div class="mat-desc">1/5 feature xong</div></div>
+<div class="mat-step planned" onclick="sendPrompt('L3→L4 checklist: CI .github/workflows/ci.yml xanh, installer 1 lệnh, tag v0.4.0, 13 tool. Cái nào chưa done?')">
+  <div class="mat-num">L4</div><div class="mat-name">Vành đai phát hành</div><div class="mat-desc">CI+installer+tag</div></div>
+<div class="mat-step planned" onclick="sendPrompt('L4→L5 checklist: bench n>=30 trên core mới, English docs, CEO quyết publish. Đọc docs/PRODUCT_DIRECTION_V03.md.')">
+  <div class="mat-num">L5</div><div class="mat-name">v1.0 publish</div><div class="mat-desc">bench n≥30 + docs EN</div></div>
+</div>
+
+<div class="section-title">Lộ trình theo checkpoint (mỗi checkpoint dừng xin duyệt)</div>
+<div class="timeline">
+<div class="tl-head"></div>
+<div class="tl-head">Bước 1 · Thiết kế</div>
+<div class="tl-head">Bước 2 · Build</div>
+<div class="tl-head">Bước 3 · Verify</div>
+
+<div class="tl-row-label"><div class="tl-pillar-name">F1 — Đa-repo + index + resume</div><div class="tl-pillar-score" style="color:var(--color-text-warning)">TODO</div><div class="tl-pillar-weight">checkpoint 2 · lõi wave</div></div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Chi tiết task F1-1: sửa core/mcp_server.py dòng 787 dùng lease.repo_identity(bound_cwd) thay vì bound_workspace/AOF_WORKSPACE — xem PHẦN 5 TASK F1-1 trong AOF_V04_AUTOHANDOFF_CONTEXT.md')">
+    <div class="task-dot" style="background:#EF9F27"></div><div><div class="task-text">F1-1: repo_identity thay AOF_WORKSPACE</div><div class="task-sub">core/mcp_server.py dòng 787</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Chi tiết task F1-2: thêm append_handoff_index() vào core/oplog.py, ghi ~/.aof/handoffs/index.jsonl — xem PHẦN 5 TASK F1-2 trong AOF_V04_AUTOHANDOFF_CONTEXT.md')">
+    <div class="task-dot" style="background:#EF9F27"></div><div><div class="task-text">F1-2: index.jsonl writer</div><div class="task-sub">core/oplog.py, append-only</div></div></div>
+  <div class="task" onclick="sendPrompt('Chi tiết task F1-3: aof resume — CLI subparser + MCP tool thứ 13 trong core/mcp_server.py — xem PHẦN 5 TASK F1-3 trong AOF_V04_AUTOHANDOFF_CONTEXT.md')">
+    <div class="task-dot" style="background:#EF9F27"></div><div><div class="task-text">F1-3: aof resume (tool 13)</div><div class="task-sub">core/cli.py + core/mcp_server.py</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Verify F1: python3.10 -m pytest -q tests/test_recap_handoff.py tests/test_lease.py — phải 0 fail, cộng thêm test đa-repo 2 repo giả lập tmp_path')">
+    <div class="task-dot" style="background:#639922"></div><div><div class="task-text">Test đa-repo 2 repo giả lập</div><div class="task-sub">tmp_path, không tráo lẫn</div></div></div>
+</div>
+
+<div class="tl-row-label"><div class="tl-pillar-name">F3 — Error ledger chống tái phạm</div><div class="tl-pillar-score" style="color:var(--color-text-warning)">TODO</div><div class="tl-pillar-weight">checkpoint 3</div></div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Chi tiết task F3-1: mở rộng session_log event=error ghi ~/.aof/errors.jsonl — xem PHẦN 5 TASK F3-1 trong AOF_V04_AUTOHANDOFF_CONTEXT.md, đọc core/mcp_server.py dòng 764-773 trước')">
+    <div class="task-dot" style="background:#7F77DD"></div><div><div class="task-text">F3-1: errors.jsonl qua session_log</div><div class="task-sub">core/mcp_server.py dòng 764</div></div></div>
+  <div class="task" onclick="sendPrompt('Seed 2 lỗi mẫu cùng fingerprint qua session_log event=error để test preflight warn — dùng data test trong tests/test_preflight.py')">
+    <div class="task-dot" style="background:#7F77DD"></div><div><div class="task-text">Seed lỗi mẫu (2x cùng fingerprint)</div><div class="task-sub">chuẩn bị dữ liệu test</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Chi tiết task F3-2: preflight đọc errors.jsonl, WARN khi status khác closed hoặc fingerprint lặp >=2 — xem PHẦN 5 TASK F3-2, sửa core/preflight.py dòng 200-224')">
+    <div class="task-dot" style="background:#7F77DD"></div><div><div class="task-text">F3-2: preflight WARN tái phạm</div><div class="task-sub">core/preflight.py dòng 214</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Chi tiết task F3-3: aof lessons + luật đóng lỗi bắt buộc test_ref — xem PHẦN 5 TASK F3-3, thêm subparser vào core/cli.py dòng 36-42')">
+    <div class="task-dot" style="background:#639922"></div><div><div class="task-text">F3-3: aof lessons + test_ref gate</div><div class="task-sub">core/cli.py + core/oplog.py</div></div></div>
+</div>
+
+<div class="tl-row-label"><div class="tl-pillar-name">F4 — Chuẩn kiểm soát worker</div><div class="tl-pillar-score" style="color:var(--color-text-warning)">TODO</div><div class="tl-pillar-weight">checkpoint 4</div></div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Chi tiết task F4-1: policy worker_stale_after_s mặc định 300 theo khuôn heartbeat.DEFAULT_STALE_AFTER_S — xem PHẦN 5 TASK F4-1 trong AOF_V04_AUTOHANDOFF_CONTEXT.md')">
+    <div class="task-dot" style="background:#1D9E75"></div><div><div class="task-text">F4-1: policy worker_stale_after_s</div><div class="task-sub">core/mcp_server.py _workspace_policy()</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Viết docs/WORKER_CONTROL_VI.md 1 trang: contract C 7 dòng+DoD-cmd, canh output không tin session, worker không tự chấm, đo per-task qua op_log --task')">
+    <div class="task-dot" style="background:#1D9E75"></div><div><div class="task-text">docs/WORKER_CONTROL_VI.md</div><div class="task-sub">4 luật đo được, 1 trang</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Mở rộng tests/test_policy_compat.py cho worker_stale_after_s: đọc đúng từ .aof_policy.json, fallback default 300')">
+    <div class="task-dot" style="background:#639922"></div><div><div class="task-text">test_policy_compat.py mở rộng</div><div class="task-sub">policy key mới có test</div></div></div>
+</div>
+
+<div class="tl-row-label"><div class="tl-pillar-name">F5 — CI</div><div class="tl-pillar-score" style="color:var(--color-text-warning)">TODO</div><div class="tl-pillar-weight">checkpoint 4 · chặn hồi quy</div></div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Chi tiết task F5-1: tạo .github/workflows/ci.yml ma trận python 3.10/3.11/3.12, ruff+pytest — xem PHẦN 5 TASK F5-1 trong AOF_V04_AUTOHANDOFF_CONTEXT.md')">
+    <div class="task-dot" style="background:#888780"></div><div><div class="task-text">F5-1: .github/workflows/ci.yml</div><div class="task-sub">ma trận 3.10-3.12</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Parse thử .github/workflows/ci.yml bằng python -c import yaml; yaml.safe_load(open(...)) để xác nhận YAML hợp lệ trước khi commit')">
+    <div class="task-dot" style="background:#888780"></div><div><div class="task-text">YAML lint check</div><div class="task-sub">yaml.safe_load parse thử</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Xác nhận CI mới không đụng release/publish workflow nào khác — kiểm tra git diff --stat chỉ có đúng 1 file .github/workflows/ci.yml')">
+    <div class="task-dot" style="background:#639922"></div><div><div class="task-text">Verify không đụng release/publish</div><div class="task-sub">git diff --stat = 1 file mới</div></div></div>
+</div>
+
+<div class="tl-row-label"><div class="tl-pillar-name">L→L+1 Gap Row</div><div class="tl-pillar-score" style="color:var(--color-text-tertiary)">maturity</div><div class="tl-pillar-weight">dedicated</div></div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('L3 nội bộ đạt: 134 test xanh, ruff clean — xác nhận lại bằng python3.10 -m pytest -q trước khi báo CEO')">
+    <div class="task-dot" style="background:#1D9E75"></div><div><div class="task-text">L3 nội bộ: 134 test xanh</div><div class="task-sub">đã đạt, xác nhận lại mỗi checkpoint</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('L4 vành đai cần CI xanh — kiểm tra .github/workflows/ci.yml đã tạo và chạy pass chưa sau F5-1')">
+    <div class="task-dot" style="background:#1D9E75"></div><div><div class="task-text">L4 cần: CI xanh</div><div class="task-sub">sau F5-1</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('L4 vành đai cần 13 tool đúng catalog — printf initialize+tools/list | python core/mcp_server.py, đếm lại sau F1-3')">
+    <div class="task-dot" style="background:#1D9E75"></div><div><div class="task-text">L4 cần: 13 tool đúng catalog</div><div class="task-sub">sau F1-3, đếm động qua doctor.py</div></div></div>
+</div>
+
+<div class="tl-row-label"><div class="tl-pillar-name">UI/CEO Dashboard Row</div><div class="tl-pillar-score" style="color:var(--color-text-tertiary)">governance</div><div class="tl-pillar-weight">dedicated</div></div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Luật mới: mọi ExecPlan đụng nhiều file phải có HTML review trước khi sửa code — xem docs/PLAN_REVIEW_STANDARD.md trong vendors/agent-operating-framework')">
+    <div class="task-dot" style="background:#888780"></div><div><div class="task-text">Plan HTML review trước mỗi checkpoint</div><div class="task-sub">docs/PLAN_REVIEW_STANDARD.md</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Duyệt bằng artifact trong phiên (present_files) — không treo duyệt trong chat, theo luật Duyệt bằng artifact 18/07 trong Estate Console memory ledger')">
+    <div class="task-dot" style="background:#888780"></div><div><div class="task-text">Duyệt bằng artifact trong phiên</div><div class="task-sub">present_files, không treo chat</div></div></div>
+</div>
+<div class="tl-cell">
+  <div class="task" onclick="sendPrompt('Tra Estate Console (docs.nampham.net/estate) trước khi tự bịa quy trình/định dạng mới — dùng Claude in Chrome navigate + get_page_text vì trang render JS')">
+    <div class="task-dot" style="background:#888780"></div><div><div class="task-text">Tra Estate Console trước khi tự bịa</div><div class="task-sub">docs.nampham.net/estate</div></div></div>
+</div>
+
+<div class="milestone-row">
+  <span class="ms-chip" style="background:var(--color-background-success);color:var(--color-text-success)">M1 · F2 xong</span>
+  <span class="ms-label">PASS — 134 test xanh, ruff clean, chưa commit (chờ gỡ git lock)</span>
+</div>
+<div class="milestone-row">
+  <span class="ms-chip" style="background:var(--color-background-warning);color:var(--color-text-warning)">M2 · F1+F3 xong</span>
+  <span class="ms-label">Gap cần làm — 0/2 done, chờ checkpoint 2+3</span>
+</div>
+<div class="milestone-row">
+  <span class="ms-chip" style="background:var(--color-background-danger);color:var(--color-text-danger)">M3 · v0.4 vành đai</span>
+  <span class="ms-label">Gap cần làm — CI + worker doc + tag v0.4.0 chưa có</span>
+</div>
+
+</div>
+
+<div class="section-title">3 gap lớn nhất cần ưu tiên ngay</div>
+<div class="gap-grid">
+<div class="gap-card" onclick="sendPrompt('Hướng dẫn gỡ .git/index.lock: kiểm tra VS Code/Claude Code/git GUI nào đang mở repo vendors/agent-operating-framework trên máy thật, đóng lại rồi thử git status')">
+  <div class="gap-title"><span style="color:#A32D2D">*</span> Git lock chặn commit</div>
+  <div class="gap-item">.git/index.lock rm trả EPERM</div>
+  <div class="gap-item">Không phải stale lock thường</div>
+  <div class="gap-item">F2 đã xanh nhưng chưa commit được</div>
+</div>
+<div class="gap-card" onclick="sendPrompt('Hướng dẫn implement F1 gap: core/mcp_server.py dòng 787 dùng bound_workspace thay vì repo_identity — bằng chứng sống là HANDOFF_20260721_065222.md ghi sai chỗ')">
+  <div class="gap-title"><span style="color:#EF9F27">*</span> F1: handoff ghi sai repo</div>
+  <div class="gap-item">Bằng chứng sống đã quan sát</div>
+  <div class="gap-item">core/lease.py::repo_identity có sẵn</div>
+  <div class="gap-item">Chỉ cần nối dây, không viết mới</div>
+</div>
+<div class="gap-card" onclick="sendPrompt('Hướng dẫn implement F5 gap: chưa có .github/workflows/ci.yml nào — tạo mới theo PHẦN 5 TASK F5-1 trong AOF_V04_AUTOHANDOFF_CONTEXT.md')">
+  <div class="gap-title"><span style="color:#888780">*</span> F5: CI chưa tồn tại</div>
+  <div class="gap-item">.github/workflows/ chưa có file nào</div>
+  <div class="gap-item">Không chặn hồi quy cho F1-F4</div>
+  <div class="gap-item">1 trong 4 thứ vành đai trước publish</div>
+</div>
+</div>
+
+<div class="legend">
+<div class="leg-item"><span class="leg-dot" style="background:#639922"></span>Verify/DONE</div>
+<div class="leg-item"><span class="leg-dot" style="background:#EF9F27"></span>F1 core</div>
+<div class="leg-item"><span class="leg-dot" style="background:#7F77DD"></span>F3 error ledger</div>
+<div class="leg-item"><span class="leg-dot" style="background:#1D9E75"></span>F4 / maturity gap</div>
+<div class="leg-item"><span class="leg-dot" style="background:#888780"></span>F5 / infra / governance</div>
+</div>
+
+<p class="honest">Số liệu (tests, ruff, tool count, git lock) lấy nguyên từ chạy trực tiếp trong phiên này — không suy đoán. Task/prompt map 1-1 với Master Context AOF_V04_AUTOHANDOFF_CONTEXT.md PHẦN 5. Nếu số liệu lệch tại thời điểm anh xem, PHẦN 6 (Session End Protocol) là cách đo lại chính xác.</p>
+</div>
+<script>
+function sendPrompt(text){
+  if (window.parent && window.parent.sendPrompt) { window.parent.sendPrompt(text); return; }
+  if (window.sendPrompt && window.sendPrompt !== sendPrompt) { window.sendPrompt(text); return; }
+  navigator.clipboard && navigator.clipboard.writeText(text);
+  alert('Đã copy prompt vào clipboard:\n\n' + text);
+}
+</script>
+</body></html>

@@ -192,6 +192,50 @@ def test_quality_gate_not_compileall_only():
     assert r["passed"] is False
 
 
+def test_gate_commands_use_project_venv_python(tmp_path, monkeypatch):
+    """Gate argv[0] must be the project's venv python when present, not aof's sys.executable.
+
+    Gate runs the *project's* tests/lint, so it must use an interpreter that sees
+    the project's dependencies. Falling back to sys.executable (aof's env) makes
+    every project-with-its-own-venv fail for environment reasons, not code.
+    """
+    from core.mcp_server import _gate_commands
+
+    # Clear so quality returns both ruff + pytest (covers all 4 argv[0] sites).
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    # (a) cwd has .venv/bin/python → every gate uses that path, not sys.executable
+    venv_py = tmp_path / ".venv" / "bin" / "python"
+    venv_py.parent.mkdir(parents=True)
+    venv_py.write_text("#!/bin/sh\n")
+    venv_py.chmod(0o755)
+    # quality also appends pytest only when tests/ exists
+    (tmp_path / "tests").mkdir()
+
+    for gate in ("ruff", "pytest", "quality"):
+        cmds = _gate_commands(gate, str(tmp_path), [])
+        assert cmds, f"{gate} must resolve to at least one command"
+        if gate == "quality":
+            assert len(cmds) == 2, "quality must emit ruff + pytest when tests/ present"
+        for cmd in cmds:
+            assert cmd[0] == str(venv_py), (
+                f"{gate}: argv[0]={cmd[0]!r} must be project venv, not {sys.executable!r}"
+            )
+            assert cmd[0] != sys.executable
+
+    # (b) cwd without venv → still sys.executable (no regression)
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    (bare / "tests").mkdir()
+    for gate in ("ruff", "pytest", "quality"):
+        cmds = _gate_commands(gate, str(bare), [])
+        assert cmds, f"{gate} must resolve without project venv"
+        for cmd in cmds:
+            assert cmd[0] == sys.executable, (
+                f"{gate}: without venv, argv[0] must fall back to sys.executable, got {cmd[0]!r}"
+            )
+
+
 # ===================================================================
 # 5. Gate cwd outside workspace → block
 # ===================================================================

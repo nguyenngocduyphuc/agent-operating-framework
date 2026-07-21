@@ -49,7 +49,7 @@ def payload(resp):
 
 
 class _Client:
-    def __init__(self):
+    def __init__(self, extra_env=None):
         self.proc = subprocess.Popen(
             [sys.executable, str(SERVER)],
             stdin=subprocess.PIPE,
@@ -57,7 +57,7 @@ class _Client:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
-            env={**os.environ, "PYTHONPATH": str(REPO)},
+            env={**os.environ, "PYTHONPATH": str(REPO), **(extra_env or {})},
         )
         self._q: queue.Queue = queue.Queue()
         self._t = threading.Thread(target=self._reader, daemon=True)
@@ -136,25 +136,58 @@ def test_tools_call_result_uses_mcp_content_envelope(client):
     assert "ok" not in result, "business keys must live inside content[0].text, not on result"
 
 
-def test_every_tool_answers_with_the_envelope(client):
-    """All 7 tools, success or refusal, must be readable by a client."""
-    client.request("initialize", req_id=1)
-    tools = client.request("tools/list", req_id=2)["result"]["tools"]
-    assert len(tools) == 7, f"expected 7 tools, got {len(tools)}"
-    args = {
-        "check_contract": {"brief": GOOD_BRIEF},
-        "verify_gate": {"gate_type": "ruff"},
-        "audit_scope": {"scope": ["core/**"]},
-        "session_log": {"event": "goal"},
-        "post_evidence": {"task_gid": "T-1", "summary": "s"},
-        "operating_protocol": {"workspace": str(REPO)},
-        "preflight": {"cwd": str(REPO)},
-    }
-    for i, tool in enumerate(tools):
-        resp = client.request(
-            "tools/call", {"name": tool["name"], "arguments": args[tool["name"]]}, req_id=100 + i
+def test_every_tool_answers_with_the_envelope(tmp_path):
+    """Every catalog tool, success or refusal, must be readable by a client."""
+    # F1 (v0.4): preflight against a real repo distinct from AOF_WORKSPACE, so
+    # this test also proves recap/handoff land next to THAT repo, not the
+    # workspace -- the exact bug F1 fixes. Preflighting against the real
+    # agent-operating-framework checkout here would write test artifacts into
+    # the actual repo once that fix lands, so use an isolated git repo instead.
+    work_repo = tmp_path / "workrepo"
+    work_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work_repo, check=True)
+    # preflight only binds bound_cwd on status=="clear"; staying on main/master
+    # triggers a warn and leaves bound_cwd unset, so use a feature branch.
+    subprocess.run(["git", "checkout", "-q", "-b", "feat/fixture"], cwd=work_repo, check=True)
+    client = _Client(extra_env={"AOF_WORKSPACE": str(tmp_path),
+                                "AOF_AUDIT_DIR": str(tmp_path / "aofhome")})
+    try:
+        client.request("initialize", req_id=1)
+        tools = client.request("tools/list", req_id=2)["result"]["tools"]
+        from core.mcp_server import TOOLS
+        assert len(tools) == len(TOOLS), f"expected {len(TOOLS)} tools, got {len(tools)}"
+        args = {
+            "check_contract": {"brief": GOOD_BRIEF},
+            "verify_gate": {"gate_type": "ruff"},
+            "audit_scope": {"scope": ["core/**"]},
+            "session_log": {"event": "goal"},
+            "post_evidence": {"task_gid": "T-1", "summary": "s"},
+            "operating_protocol": {"workspace": str(REPO)},
+            "preflight": {"cwd": str(work_repo)},
+            "status_report": {"lang": "en"},
+            "op_log": {"since_hours": 1},
+            "session_recap": {"since_hours": 1},
+            "session_handoff": {"since_hours": 1},
+            "worker_watch": {"path": str(tmp_path / "nope.log")},
+            "aof_resume": {},
+        }
+        for i, tool in enumerate(tools):
+            resp = client.request(
+                "tools/call", {"name": tool["name"], "arguments": args[tool["name"]]},
+                req_id=100 + i,
+            )
+            envelope(resp)  # raises with a readable message if the envelope is wrong
+        # F1: recap/handoff must land next to the bound repo (work_repo), not
+        # the parent AOF_WORKSPACE (tmp_path) -- proves nearest_repo() wiring.
+        sessions = work_repo / "docs" / "sessions"
+        assert sessions.is_dir(), "recap/handoff did not land next to the bound repo"
+        assert any(p.suffix == ".html" for p in sessions.iterdir())
+        assert any(p.suffix == ".md" for p in sessions.iterdir())
+        assert not (tmp_path / "docs" / "sessions").exists(), (
+            "recap/handoff leaked into AOF_WORKSPACE instead of the bound repo"
         )
-        envelope(resp)  # raises with a readable message if the envelope is wrong
+    finally:
+        client.close()
 
 
 def test_refusal_is_a_readable_iserror_result_not_a_protocol_error(client):
@@ -187,6 +220,104 @@ def test_operating_protocol_returns_markdown_verbatim(client):
     text = envelope(resp)["content"][0]["text"]
     assert envelope(resp)["isError"] is False
     assert text.lstrip().startswith("#"), "expected raw markdown, not a JSON blob"
+
+
+def test_status_report_is_plain_text_and_never_gated(client):
+    """A blocked non-technical operator most needs to see WHY — no preconditions."""
+    client.request("initialize", req_id=1)
+    resp = client.request(
+        "tools/call", {"name": "status_report", "arguments": {"lang": "en"}}, req_id=2
+    )
+    result = envelope(resp)
+    assert result["isError"] is False
+    text = result["content"][0]["text"]
+    assert "Next step" in text, "report must always tell the operator what to do next"
+    assert "{" not in text.split("\n")[0], "header must be plain language, not JSON"
+
+
+def test_status_report_vietnamese_default(client):
+    client.request("initialize", req_id=1)
+    resp = client.request("tools/call", {"name": "status_report", "arguments": {}}, req_id=2)
+    text = envelope(resp)["content"][0]["text"]
+    assert "Bước tiếp theo" in text
+
+
+def _git_repo_with_policy(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "f.txt").write_text("x")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+        cwd=tmp_path, check=True,
+    )
+    subprocess.run(["git", "checkout", "-qb", "feat/T-9"], cwd=tmp_path, check=True)
+    (tmp_path / ".aof_policy.json").write_text(
+        json.dumps({"require_task": False}), encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_second_session_on_same_task_is_refused(tmp_path):
+    """C2 end to end: two servers, one task, one repo -> second preflight refused."""
+    env = {
+        "AOF_WORKSPACE": str(tmp_path),
+        "AOF_AUDIT_DIR": str(tmp_path / "aofhome"),
+    }
+    _git_repo_with_policy(tmp_path)
+    a, b = _Client(extra_env=env), _Client(extra_env=env)
+    try:
+        a.request("initialize", req_id=1)
+        b.request("initialize", req_id=1)
+        r1 = a.request(
+            "tools/call",
+            {"name": "preflight", "arguments": {"cwd": str(tmp_path), "task": "T-9"}},
+            req_id=2,
+        )
+        assert envelope(r1)["isError"] is False
+        assert payload(r1)["lease"]["status"] == "acquired"
+        r2 = b.request(
+            "tools/call",
+            {"name": "preflight", "arguments": {"cwd": str(tmp_path), "task": "T-9"}},
+            req_id=2,
+        )
+        assert envelope(r2)["isError"] is True, "second live session must be refused"
+        body = payload(r2)
+        assert body["error_code"] == -32011
+        assert "LIVE" in body["error"]
+    finally:
+        a.close()
+        b.close()
+
+
+def test_lease_released_when_session_ends(tmp_path):
+    """A crashed/closed session must never brick the task for the next one."""
+    env = {
+        "AOF_WORKSPACE": str(tmp_path),
+        "AOF_AUDIT_DIR": str(tmp_path / "aofhome"),
+    }
+    _git_repo_with_policy(tmp_path)
+    a = _Client(extra_env=env)
+    a.request("initialize", req_id=1)
+    r1 = a.request(
+        "tools/call",
+        {"name": "preflight", "arguments": {"cwd": str(tmp_path), "task": "T-9"}},
+        req_id=2,
+    )
+    assert payload(r1)["lease"]["status"] == "acquired"
+    a.close()  # graceful end -> release on stdin EOF
+
+    b = _Client(extra_env=env)
+    try:
+        b.request("initialize", req_id=1)
+        r2 = b.request(
+            "tools/call",
+            {"name": "preflight", "arguments": {"cwd": str(tmp_path), "task": "T-9"}},
+            req_id=2,
+        )
+        assert envelope(r2)["isError"] is False
+        assert payload(r2)["lease"]["status"] in ("acquired", "takeover")
+    finally:
+        b.close()
 
 
 def test_full_oneshot_sequence(client):

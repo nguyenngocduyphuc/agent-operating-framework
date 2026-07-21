@@ -1,36 +1,40 @@
-# AntiGravity-IDE Upgrade — Structure Rules
+# Contributing to Agent Operating Framework
 
-> **AI agents: READ THIS before creating any file at workspace root.**
+## Canonical repo
 
-## 🚫 Root is LOCKED
+This directory (`vendors/agent-operating-framework` in a workspace, or the
+standalone clone) is the **only** product tree. Do not edit shadow copies of
+`core/` elsewhere on a machine.
 
-**NEVER create files at root level.** This workspace was cleaned on 2026-03-19 from 376 files → 40.
+## Required reading (in order)
 
-### Files that MUST stay at root
+1. `docs/HISTORY_GOVERNANCE.md` — History Gate
+2. `docs/ARCHITECTURE.md` — layers and boundaries
+3. `docs/ENGINEERING_WORKFLOW.md` — how to change code safely
+4. `docs/DOCUMENT_GOVERNANCE.md` — how to change docs without drift
 
-| Category | Files |
-|----------|-------|
-| AI Config | `AGENTS.md`, `CLAUDE.md`, `SKILL_CATALOG.md`, `docs/guides/IDE_OPERATING_MANUAL.md` |
-| CLI | `ag.py`, `ag.cmd`, `ag-*.cmd`, `yolo.py`, `yolo.cmd`, `idea_nam.cmd` |
-| Launchers | `CEO_AUTOPILOT.cmd`, `START_CEO_AUTOPILOT.cmd` |
-| Dashboard | `dashboard.py`, `aom_logger.py`, `obsidian_helper.py` |
-| Package | `package.json`, `requirements_master.txt`, `LICENSE`, `README.md` |
-| Config | `.env`, `.gitignore`, `.editorconfig`, `.mcp.json` |
+## Dev setup
 
-### Everything else goes in a subfolder
+```bash
+cd /path/to/agent-operating-framework
+python3 -m pip install -e ".[dev]"   # or: pip install pytest ruff && PYTHONPATH=.
+ruff check core/ tests/
+python3 -m pytest -q
+```
 
-| File Type | Target Folder |
-|-----------|---------------|
-| Python script | `scripts/` |
-| Report/Summary | `reports/` |
-| Handoff | `handoffs/` |
-| Documentation | `docs/` |
-| Test file | `tests/` |
-| Config/Data | `config/` or `data/` |
-| Screenshot | `screenshots/` |
-| Plan | `plans/` |
-| Log | `logs/` |
-| Batch/.cmd | `scripts/` or project-specific `bin/` |
+Register MCP with an **absolute** path to this tree’s server entry (see
+`aof doctor` output), not `python -m core.mcp_server` from a parent monorepo.
 
----
-*Updated: 2026-03-19 — Post-cleanup enforcement*
+## Pull requests
+
+- Feature branch off the active development branch
+- Tests + ruff green
+- User-visible changes noted in `CHANGELOG.md`
+- No hardcoded MCP tool counts; doctor compares to `TOOLS` dynamically
+
+## What we will reject
+
+- Nudging fail-closed gates so a test turns green
+- Putting tracker/cmux logic into `core/`
+- Auto-applying self-improve proposals without human approval
+- Docs claims that cannot be reproduced with a command in the PR

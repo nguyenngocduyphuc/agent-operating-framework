@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AOF — One-pager (Team)</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --card: #121a2b;
+    --line: #243049;
+    --text: #e8eef9;
+    --muted: #93a4c3;
+    --accent: #3d8bfd;
+    --ok: #3dd68c;
+    --warn: #f5a524;
+    --bad: #f31260;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.35;
+  }
+  .page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 28px 32px 36px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 16px;
+    margin-bottom: 18px;
+  }
+  h1 { margin: 0; font-size: 1.55rem; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 0.92rem; margin-top: 6px; }
+  .badge {
+    align-self: flex-start;
+    background: #1a2740;
+    border: 1px solid var(--line);
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 6px 10px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 14px;
+  }
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+    .page { padding: 18px; }
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .card h2 {
+    margin: 0 0 10px;
+    font-size: 0.95rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .card p, .card li { font-size: 0.9rem; }
+  .card ul { margin: 0; padding-left: 1.1rem; }
+  .card li { margin: 0.28rem 0; }
+  .full { grid-column: 1 / -1; }
+  .row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  @media (max-width: 860px) {
+    .row { grid-template-columns: 1fr 1fr; }
+  }
+  .kpi {
+    background: #0e1626;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+  }
+  .kpi b { display: block; font-size: 1.05rem; margin-bottom: 4px; }
+  .kpi span { color: var(--muted); font-size: 0.78rem; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  th, td {
+    border-bottom: 1px solid var(--line);
+    padding: 6px 4px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { color: var(--muted); font-weight: 600; }
+  .flow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    background: #0e1626;
+    border-radius: 8px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    white-space: pre;
+    color: #c9d7f2;
+  }
+  footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.8rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  a { color: #7eb6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .tag { color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <h1>Agent Operating Framework (AOF)</h1>
+        <div class="sub">
+          Lớp tin cậy cho AI agent — chặn sai chỗ, bắt bằng chứng, bàn giao, đo hiệu quả.
+          <span class="tag">Không phải orchestrator · v0.3.0b1 · MIT</span>
+        </div>
+      </div>
+      <div class="badge">TEAM ONE-PAGER</div>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>1. Vì sao tồn tại</h2>
+        <ul>
+          <li>Agent hay <b>sai repo/nhánh</b>, <b>tự bảo xong</b>, <b>giẫm task</b>, <b>mất bàn giao</b>.</li>
+          <li>AOF đứng <b>trước</b> mọi agent (Claude / Cowork / Codex…): <b>fail-closed</b>.</li>
+          <li>CEO no-code: 1 câu giao việc → đôi khi duyệt → đọc recap / hiệu quả.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>2. Giá trị (1 dòng / người)</h2>
+        <ul>
+          <li><b>CEO:</b> “Tình hình?” → 4 trạng thái + bước tiếp + pulse 24h.</li>
+          <li><b>Agent:</b> preflight · contract+Karpathy · lease · verify · scope.</li>
+          <li><b>Team:</b> CI + Issue hiệu quả + release tag.</li>
+          <li><b>Đã đo:</b> chặn out-of-scope 100% vs bare 43% (n=105); cost ~+35%.</li>
+        </ul>
+      </section>
+
+      <section class="card full">
+        <h2>3. Workflow no-code (9 bước máy)</h2>
+        <div class="flow">preflight → check_contract (Karpathy) → [needs_approval?] → work
+    → verify_gate + audit_scope → post_evidence (Done|Blocked)
+    → session_handoff + RECAP → (phiên sau) aof_resume
+    → status_report / estate_report · auto HIEU_QUA_HOM_NAY.md</div>
+        <table style="margin-top:10px">
+          <thead>
+            <tr><th>#</th><th>Bước</th><th>Người chạm?</th><th>Nghiệm thu</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td>Preflight + lease</td><td>Không</td><td>clear</td></tr>
+            <tr><td>2</td><td>Contract + Assumptions + DoD-cmd</td><td>Sửa brief nếu fail</td><td>ok=true</td></tr>
+            <tr><td>3–5</td><td>Phân rã · duyệt rủi ro · làm trong Scope</td><td>Gật nếu Chờ duyệt</td><td>không lan scope</td></tr>
+            <tr><td>6–7</td><td>Verify + evidence</td><td>Không</td><td>Done hoặc Blocked</td></tr>
+            <tr><td>8–9</td><td>Handoff · resume · hiệu quả</td><td>Đọc file / hỏi tình hình</td><td>file + pulse</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>4. Một ngày của CEO</h2>
+        <ul>
+          <li><b>Giao việc:</b> “Dùng AOF làm: …”</li>
+          <li><b>Giữa chừng:</b> “Tình hình sao rồi?”</li>
+          <li><b>Cuối ngày:</b> mở <code>~/.aof/estate/HIEU_QUA_HOM_NAY.md</code></li>
+          <li><b>Tuần:</b> Issue tracker + optional post script</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>5. Đo & GitHub</h2>
+        <ul>
+          <li>Auto file hiệu quả mỗi session MCP</li>
+          <li>Tracker: <a href="https://github.com/nguyenngocduyphuc/agent-operating-framework/issues/21">Issue #21</a></li>
+          <li>Post KPI: <code>bash scripts/post_effectiveness_to_github.sh 7</code></li>
+          <li>CI = code xanh · Issue = dùng thật</li>
+        </ul>
+      </section>
+
+      <section class="card full">
+        <h2>6. Trạng thái hiện tại (thành thật)</h2>
+        <div class="row">
+          <div class="kpi"><b class="ok">v0.3.0b1</b><span>Release tag</span></div>
+          <div class="kpi"><b class="ok">14 tools</b><span>MCP surface</span></div>
+          <div class="kpi"><b class="ok">163 tests</b><span>CI 3.10–3.12</span></div>
+          <div class="kpi"><b class="warn">~5.5/10</b><span>Publish-ready</span></div>
+        </div>
+        <ul style="margin-top:12px">
+          <li class="ok"><b>Đủ:</b> trust core, Karpathy default, handoff/resume code, estate no-code, clean clone doctor.</li>
+          <li class="warn"><b>Yếu:</b> dogfood handoff/resume/blocked trên vận hành thật; PyPI; pilot stranger.</li>
+          <li><b>Không phải:</b> orchestrator · fleet UI · claim ROI khi chưa dogfood 14 ngày.</li>
+        </ul>
+      </section>
+
+      <section class="card full">
+        <h2>7. 14 ngày tới (team cam kết)</h2>
+        <ul>
+          <li>Mỗi phiên: contract Karpathy + handoff; phiên sau resume.</li>
+          <li>Kẹt → <b>Blocked</b> (có sổ), không “xong miệng”.</li>
+          <li>Cuối tuần đọc Issue #21; handoff tuần = 0 → <b>cấm feature mới</b>.</li>
+          <li>Checklist chi tiết: <code>docs/DOGFOOD_14DAY_CHECKLIST.md</code></li>
+        </ul>
+      </section>
+    </div>
+
+    <footer>
+      <div>
+        Repo:
+        <a href="https://github.com/nguyenngocduyphuc/agent-operating-framework">github.com/…/agent-operating-framework</a>
+        ·
+        <a href="https://github.com/nguyenngocduyphuc/agent-operating-framework/releases/tag/v0.3.0b1">v0.3.0b1</a>
+        ·
+        <a href="https://github.com/nguyenngocduyphuc/agent-operating-framework/blob/main/docs/MASTER_PLAN.md">MASTER_PLAN</a>
+      </div>
+      <div>In / export PDF: Open in browser → Print → Save as PDF · 1 page landscape optional</div>
+    </footer>
+  </div>
+</body>
+</html>

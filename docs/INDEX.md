@@ -37,6 +37,8 @@ docs/
   EFFECTIVENESS_SMOKE_*.md    smoke WITH vs WITHOUT AOF (không phải bench n≥30)
   ESTATE_EFFECTIVENESS.md     estate KPI + `aof estate-report` (nhiều repo/host ledger)
   DOGFOOD_7DAY_VI.md          protocol 7 ngày + bypass thật
+  DOGFOOD_14DAY_CHECKLIST.md  checklist 1 trang dán bàn (14 ngày)
+  AOF_ONE_PAGER.html          one-pager team (in / PDF)
   BYPASS_AND_KARPATHY.md      Karpathy default + bản đồ bypass
   CLEAN_MACHINE_AUDIT_*.md    audit clone-only (publish score)
   plans/AOF_BEST_PATH_90D.md  kế hoạch 90 ngày tốt nhất

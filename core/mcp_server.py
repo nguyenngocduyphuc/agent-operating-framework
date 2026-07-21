@@ -713,9 +713,18 @@ def _call(rid,p):
                         if scope_val:
                             _state["contract_scope_parsed"] = [s.strip() for s in scope_val.split(",")]
                         break
-            _audit({"event":"check_contract","ok":r["ok"]})
-            write_decision({"session":SESSION_ID,"decision":"check_contract","ok":bool(r["ok"]),
-                            "missing_required":r.get("missing_required"),"task":_state.get("bound_task")})
+            _audit({"event":"check_contract","ok":r["ok"],
+                    "karpathy_required":r.get("karpathy_required"),
+                    "karpathy_ok":r.get("karpathy_ok")})
+            write_decision({
+                "session": SESSION_ID, "decision": "check_contract",
+                "ok": bool(r["ok"]),
+                "missing_required": r.get("missing_required"),
+                "task": _state.get("bound_task"),
+                "karpathy_required": r.get("karpathy_required"),
+                "karpathy_ok": r.get("karpathy_ok"),
+                "hint": r.get("hint"),
+            })
             return _tool_ok(rid,with_stall_warning(r,SESSION_ID,"check_contract"))
         if n=="operating_protocol":
             ws=a.get("workspace") or os.environ.get("AOF_WORKSPACE") or os.getcwd()

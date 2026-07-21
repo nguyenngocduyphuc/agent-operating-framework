@@ -14,7 +14,11 @@ import pytest
 
 from tests.test_mcp_server import _Client, envelope, payload
 
-GOOD_BRIEF = "Task: t\nOwner: o\nScope: s\nDoD: d\nDo not: x\nStop if: y\nReturn: r\n"
+GOOD_BRIEF = (
+    "Task: t\nOwner: o\nScope: core/**\nDoD: d\nDo not: x\nStop if: y\nReturn: r\n"
+    "Assumptions: lanes fixture uses a single bound repo and no concurrent writers.\n"
+    "DoD-cmd: python -m pytest -q\n"
+)
 
 
 def _repo(tmp_path, lanes_enabled=True):

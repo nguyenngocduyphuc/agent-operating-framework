@@ -71,6 +71,10 @@ def load_policy(ws):
     policy_path = os.environ.get("AOF_POLICY_FILE") or os.path.join(ws, ".aof_policy.json")
     default = {
         "require_task": False,
+        # Karpathy ON by default (product claim): agent must show Assumptions +
+        # DoD-cmd + bounded Scope. Missing key used to fail OPEN (False) — that
+        # was a silent bypass vs aof init / doctor. Legacy require_ponytail maps here.
+        "require_karpathy": True,
         "require_contract": True,
         "require_evidence": True,
         "require_handoff": True,

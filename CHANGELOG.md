@@ -27,6 +27,10 @@
   open errors, per-repo). Snapshots under `~/.aof/estate/`. Preflight MCP now
   audits workspace/repo/status for multi-workspace visibility.
   See `docs/ESTATE_EFFECTIVENESS.md`.
+- **Karpathy default fail-closed:** `load_policy()` and `setup.sh` now set
+  `require_karpathy: true` (was missing → silent OFF). Docs: `BYPASS_AND_KARPATHY.md`,
+  `DOGFOOD_7DAY_VI.md`. Estate KPIs add productive vs noise sessions + untagged task
+  activity. `scripts/estate_weekly.sh` for weekly HTML (+ optional cmux open).
 
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo

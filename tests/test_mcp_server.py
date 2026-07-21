@@ -25,7 +25,11 @@ REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "core" / "mcp_server.py"
 TIMEOUT_S = 5.0
 
-GOOD_BRIEF = "Task: t\nOwner: o\nScope: s\nDoD: d\nDo not: x\nStop if: y\nReturn: r\n"
+GOOD_BRIEF = (
+    "Task: t\nOwner: o\nScope: core/**\nDoD: d\nDo not: x\nStop if: y\nReturn: r\n"
+    "Assumptions: fixture repo has no concurrent writers on the same task lease.\n"
+    "DoD-cmd: python -m pytest -q\n"
+)
 
 
 def envelope(resp):
@@ -328,7 +332,12 @@ def test_full_oneshot_sequence(client):
     assert tools["result"]["tools"]
     call = client.request(
         "tools/call",
-        {"name": "check_contract", "arguments": {"brief": "Task: add health\nOwner: worker\nScope: api/\nDoD: tests pass\nDo not: change db\nStop if: out of scope\nReturn: diff\n"}},
+        {"name": "check_contract", "arguments": {"brief": (
+            "Task: add health\nOwner: worker\nScope: api/**\nDoD: tests pass\n"
+            "Do not: change db\nStop if: out of scope\nReturn: diff\n"
+            "Assumptions: /api router already exists; health is a new route only.\n"
+            "DoD-cmd: python -m pytest tests/test_health.py\n"
+        )}},
         req_id=3,
     )
     assert payload(call)["ok"] is True

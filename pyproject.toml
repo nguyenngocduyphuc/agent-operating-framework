@@ -16,9 +16,22 @@ dependencies = []
 [project.scripts]
 aof = "core.cli:main"
 
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.urls]
+Homepage = "https://github.com/nguyenngocduyphuc/agent-operating-framework"
+Repository = "https://github.com/nguyenngocduyphuc/agent-operating-framework"
+Issues = "https://github.com/nguyenngocduyphuc/agent-operating-framework/issues"
+Changelog = "https://github.com/nguyenngocduyphuc/agent-operating-framework/blob/main/CHANGELOG.md"
+
 [tool.setuptools]
 packages = ["core", "adapters"]
 
 [tool.setuptools.package-data]
 "core" = ["*.md"]
 "adapters" = ["*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

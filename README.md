@@ -1,17 +1,20 @@
 # Agent Operating Framework (AOF)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](core/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Status: Beta](https://img.shields.io/badge/status-beta-orange.svg)](#)
+[![CI](https://github.com/nguyenngocduyphuc/agent-operating-framework/actions/workflows/aof.yml/badge.svg)](https://github.com/nguyenngocduyphuc/agent-operating-framework/actions/workflows/aof.yml)
 
 > A lightweight operational gate for AI-agent workspaces -- prevents wrong-repo, wrong-branch, and ungrounded execution.
 
 ## Setup (3 steps)
 
 ```bash
-# 1. Install the tool
-uv tool install .               # from a clone of this repo
-# or: pip install .
+# 1. Install the tool (from a clone; PyPI not published yet)
+git clone https://github.com/nguyenngocduyphuc/agent-operating-framework
+cd agent-operating-framework
+pip install .
+# dev (tests/lint): pip install -e ".[dev]"
 
 # 2. Configure your workspace (pure Python, Windows-safe)
 aof init your-project/         # creates .aof_policy.json + .agentframework marker
@@ -22,6 +25,8 @@ claude mcp add aof -- aof start-mcp-server
 ```
 
 Idempotent -- safe to re-run. The tool stays in your PATH; the project keeps only config.
+
+**No-code daily use (no CLI):** with MCP connected, ask for status (`status_report`) — it includes a 24h effectiveness pulse. Auto file: `~/.aof/estate/HIEU_QUA_HOM_NAY.md` (refreshed on every MCP session end).
 
 ## Measured results (3-arm causal benchmark, n=105 runs, preregistered rule)
 
@@ -34,7 +39,8 @@ Idempotent -- safe to re-run. The tool stays in your PATH; the project keeps onl
 
 - **Preflight gate** -- detects workspace, repo, branch, and credential gaps before work starts. Exit 0 = ready, exit 2 = fix first.
 - **Execution contract** -- scope-lock every task with Task/Owner/Scope/DoD/Stop-if/Return. No silent expansion, no scope creep.
-- **MCP server** -- stdio JSON-RPC server for agent-host integration (Claude Code, Cline, Cursor, etc.). Exposes `preflight`, `check_contract`, `verify_gate`, `audit_scope`, `session_log`, `post_evidence`, and `status_report` tools.
+- **MCP server** -- stdio JSON-RPC (**14 tools**): `preflight`, `check_contract`, `operating_protocol`, `verify_gate`, `audit_scope`, `session_log`, `post_evidence`, `status_report`, `op_log`, `session_recap`, `session_handoff`, `worker_watch`, `aof_resume`, `estate_report`.
+- **Effectiveness (no-code)** -- `status_report` embeds a 24h pulse; `estate_report` tool + auto file `~/.aof/estate/HIEU_QUA_HOM_NAY.md` (per-workspace / cmux identity when env present).
 - **Task lease** -- one task, one live session. Keyed by the git common dir, so all linked worktrees of a repo share one lock. A second live session on the same task is refused before any gate opens; stale leases (dead holder) are taken over with provenance.
 - **Plain-language status** -- `status_report` renders session state in Vietnamese or English for non-technical operators: Blocked / Preparing / Ready / Done-with-proof, always with a concrete next step.
 - **Scope audit** -- compares changed files against the active contract scope before claiming done. Catches side-quests automatically.

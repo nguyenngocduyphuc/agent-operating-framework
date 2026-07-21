@@ -39,6 +39,9 @@
   new MCP tool `estate_report` (never gated). Operators do not need CLI.
 - **Publish hygiene:** optional extra `.[dev]` (pytest, ruff); project.urls; CI badge;
   README tool list = 14 tools + no-code pulse; clean-machine audit doc + 90-day best path.
+- **GitHub effectiveness cockpit:** tracking issue via
+  `scripts/post_effectiveness_to_github.sh`, issue template, weekly reminder workflow,
+  `docs/MASTER_PLAN.md`, `docs/metrics/README.md`.
 
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo

@@ -1,0 +1,82 @@
+# Reminder only: CI cannot see host ~/.aof ledgers.
+# Real metrics: run scripts/post_effectiveness_to_github.sh on an operator machine.
+name: Effectiveness reminder
+
+on:
+  schedule:
+    # Mondays 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Ensure tracker issue has a weekly reminder comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'AOF Effectiveness Tracker';
+            const label = 'effectiveness';
+            // ensure label
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label,
+                color: '0E8A16',
+                description: 'Operational effectiveness metrics'
+              });
+            } catch (e) { /* exists */ }
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: label,
+              state: 'open',
+              per_page: 20
+            });
+            let issue = issues.data.find(i => /Effectiveness Tracker/i.test(i.title));
+            if (!issue) {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                labels: [label],
+                body: [
+                  '# AOF Effectiveness Tracker',
+                  '',
+                  'CI **cannot** read host `~/.aof` ledgers.',
+                  '',
+                  '**To post real metrics** (on a machine that runs AOF):',
+                  '```bash',
+                  'bash scripts/post_effectiveness_to_github.sh 7',
+                  'bash scripts/post_effectiveness_to_github.sh 1  # daily',
+                  '```',
+                  '',
+                  'No-code: open `~/.aof/estate/HIEU_QUA_HOM_NAY.md` or ask the agent for `status_report` / `estate_report`.',
+                  '',
+                  'Master plan: `docs/MASTER_PLAN.md`'
+                ].join('\n')
+              });
+              issue = created.data;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: [
+                '## Weekly reminder (CI)',
+                '',
+                'Please post host metrics if not already this week:',
+                '```bash',
+                'bash scripts/post_effectiveness_to_github.sh 7',
+                '```',
+                '',
+                'Targets: handoffs ≥1/work-day, resumes ≥3/week, blocked when stuck, noise trend down.',
+                '',
+                `_automated reminder — not live KPI data_`
+              ].join('\n')
+            });
+            console.log('Reminder on issue', issue.number);

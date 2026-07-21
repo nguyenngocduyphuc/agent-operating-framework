@@ -28,6 +28,8 @@ GOOD_CONTRACT = (
     "Do not: touch deploy config\n"
     "Stop if: scope outside src/api/\n"
     "Return: diff + test results\n"
+    "Assumptions: /api router already mounts routes; health is a new handler only.\n"
+    "DoD-cmd: python -m pytest tests/test_health.py\n"
 )
 
 PROSE_ONLY_CONTRACT = (
@@ -609,13 +611,22 @@ def test_dod_cmd_runs_stored_command_only(tmp_path):
     _state["contract_dod_cmd"] = None
 
 
-def test_contract_without_dodcmd_still_valid():
-    """A standard 7-field contract with NO DoD-cmd stays valid and closes through
-    the unchanged quality/pytest path (opt-in DoD is backward compatible)."""
+def test_contract_without_dodcmd_still_valid_when_karpathy_off():
+    """Without require_karpathy, a 7-field contract with no DoD-cmd remains valid
+    (DoD-cmd is Karpathy-mode machinery). Quality gate path is unchanged."""
     from core.mcp_server import _gate_commands
 
-    r = check_contract.validate(GOOD_CONTRACT)
-    assert r["ok"], "7-field contract must pass"
+    bare = (
+        "Task: Add a health endpoint\n"
+        "Owner: codex-worker\n"
+        "Scope: src/api/health.py\n"
+        "DoD: GET /health returns 200\n"
+        "Do not: touch deploy config\n"
+        "Stop if: scope outside src/api/\n"
+        "Return: diff + test results\n"
+    )
+    r = check_contract.validate(bare, require_karpathy=False)
+    assert r["ok"], "7-field contract must pass when Karpathy is off"
     assert "dod_cmd" in r, "return dict must expose dod_cmd (backward-compatible field)"
     assert r["dod_cmd"] is None, "no DoD-cmd line -> None"
 
@@ -623,6 +634,22 @@ def test_contract_without_dodcmd_still_valid():
     assert cmds, "quality gate must still resolve without a DoD-cmd"
     flat = " ".join(" ".join(c) for c in cmds)
     assert "ruff" in flat or "pytest" in flat, "quality path unchanged"
+
+
+def test_contract_without_dodcmd_fails_when_karpathy_default_on():
+    """Product default: Karpathy ON — missing DoD-cmd must fail."""
+    bare = (
+        "Task: Add a health endpoint\n"
+        "Owner: codex-worker\n"
+        "Scope: src/api/health.py\n"
+        "DoD: GET /health returns 200\n"
+        "Do not: touch deploy config\n"
+        "Stop if: scope outside src/api/\n"
+        "Return: diff + test results\n"
+    )
+    r = check_contract.validate(bare, require_karpathy=True)
+    assert r["ok"] is False
+    assert r.get("karpathy_ok") is False
 
 # ===================================================================
 # 9. P0 — committed out-of-scope files without origin must be caught

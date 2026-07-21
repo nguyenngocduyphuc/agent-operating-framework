@@ -97,6 +97,7 @@ _DEFAULT_POLICY = {
     "allow_bootstrap_without_task": True,
     "expected_repository": "",
     "report_language": "vi",
+    "worker_stale_after_s": 300,
 }
 
 

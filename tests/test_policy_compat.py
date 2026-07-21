@@ -65,3 +65,12 @@ def test_modern_policy_unaffected(tmp_path):
     p = load_policy(str(tmp_path))
     assert p["require_task"] is False
     assert "policy_migrated_keys" not in p
+
+
+def test_worker_stale_after_s_default_and_override(tmp_path):
+    """F4-1: policy key for worker hang threshold; default 300 when unset."""
+    p0 = load_policy(str(tmp_path))  # no file → defaults
+    assert p0.get("worker_stale_after_s") == 300
+    _write(tmp_path, {"worker_stale_after_s": 120})
+    p1 = load_policy(str(tmp_path))
+    assert p1["worker_stale_after_s"] == 120

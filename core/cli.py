@@ -65,6 +65,20 @@ def main() -> None:
     p_resume.add_argument("--repo", default=None, help="working-tree path or repo_key")
     p_resume.add_argument("--lang", choices=["vi", "en"], default=None)
 
+    p_lessons = sub.add_parser(
+        "lessons",
+        help="List open error-ledger items and entries still missing test_ref.",
+    )
+    p_lessons.add_argument("--lang", choices=["vi", "en"], default=None)
+
+    p_improve = sub.add_parser(
+        "improve-check",
+        help="Propose at most ONE policy change from op_log+errors (never writes policy).",
+    )
+    p_improve.add_argument("--window-hours", type=float, default=168)
+    p_improve.add_argument("--lang", choices=["vi", "en"], default=None)
+    p_improve.add_argument("--json", action="store_true", dest="as_json")
+
     args = parser.parse_args()
 
     if args.command == "start-mcp-server":
@@ -153,9 +167,42 @@ def main() -> None:
         from core.oplog import format_resume_brief
         print(format_resume_brief(task=args.task, repo=args.repo, lang=args.lang))
         sys.exit(0)
+    elif args.command == "lessons":
+        from core.errors_ledger import format_lessons
+        print(format_lessons(args.lang))
+        sys.exit(0)
+    elif args.command == "improve-check":
+        from core.enforcement import write_decision
+        from core.improve import format_proposal, propose_policy_change
+        result = propose_policy_change(window_hours=args.window_hours)
+        # Record needs_approval when there is a real proposal — never auto-merge.
+        if result.get("proposal"):
+            write_decision({
+                "decision": "needs_approval",
+                "kind": "policy_change_proposal",
+                "proposal": result["proposal"],
+                "evidence": result.get("evidence"),
+                "ok": True,
+            })
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.as_json
+              else format_proposal(result, args.lang))
+        sys.exit(0)
     elif args.command == "watch":
+        import os as _os
+
         from core.heartbeat import DEFAULT_STALE_AFTER_S, check, format_check
-        result = check(args.file, args.stale_after or DEFAULT_STALE_AFTER_S)
+        from core.preflight import load_policy, workspace_root
+        if args.stale_after is not None:
+            stale = args.stale_after
+        else:
+            try:
+                stale = int(
+                    load_policy(workspace_root(_os.getcwd())).get("worker_stale_after_s")
+                    or DEFAULT_STALE_AFTER_S
+                )
+            except (TypeError, ValueError):
+                stale = DEFAULT_STALE_AFTER_S
+        result = check(args.file, stale)
         print(json.dumps(result, ensure_ascii=False, indent=2) if args.as_json
               else format_check(result, args.lang))
         sys.exit(0 if result["status"] == "fresh" else 2)

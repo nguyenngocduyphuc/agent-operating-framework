@@ -75,6 +75,8 @@ def load_policy(ws):
         "require_evidence": True,
         "require_handoff": True,
         "allow_bootstrap_without_task": True,
+        # F4-1: worker_watch / aof watch stale threshold (seconds).
+        "worker_stale_after_s": 300,
     }
     if not os.path.exists(policy_path):
         default["policy_file"] = policy_path
@@ -216,6 +218,13 @@ def main():
             blockers.append(f"Branch '{branch}' is for a different task than {args.task}. Create the correct branch and retry.")
         if dirty and branch in ("main", "master"):
             warns.append("Uncommitted changes on a shared branch.")
+
+    # F3-2: error ledger — warn only (never blocker) on open / repeated fingerprints.
+    try:
+        from core.errors_ledger import preflight_error_warnings
+        warns.extend(preflight_error_warnings())
+    except Exception:
+        pass
 
     expected = policy.get("expected_repository")
     identity_blocker = check_expected_repository(repo, expected)

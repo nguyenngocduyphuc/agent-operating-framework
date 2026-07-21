@@ -8,11 +8,15 @@
   `docs/ENGINEERING_WORKFLOW.md`, `docs/DOCUMENT_GOVERNANCE.md`; `CONTRIBUTING.md`
   corrected for this repo (was a stale monorepo template). Entry map:
   `docs/INDEX.md`.
-- **v0.4 F1/F2 handoff loop (in progress on branch):** `write_session_bundle`
-  (handoff+recap same stamp); write root via `nearest_repo()` (not
-  `repo_identity()` / not parent `AOF_WORKSPACE`); host index
-  `$AOF_AUDIT_DIR/handoffs/index.jsonl`; CLI `aof resume` + MCP tool
-  `aof_resume` (13th tool). Multirepo regression tests included.
+- **v0.4 F1/F2 handoff loop:** `write_session_bundle` (handoff+recap same stamp);
+  write root via `nearest_repo()`; host index `$AOF_AUDIT_DIR/handoffs/index.jsonl`;
+  CLI `aof resume` + MCP tool `aof_resume` (13th tool). Multirepo tests included.
+- **v0.4 F3 error ledger + self-improve (propose only):** `session_log event=error`
+  → `$AOF_AUDIT_DIR/errors.jsonl`; close requires `test_ref`; preflight WARNs on
+  open/repeated fingerprints; CLI `aof lessons`; CLI `aof improve-check` proposes
+  at most one policy change and never writes `.aof_policy.json`.
+- **v0.4 F4 worker control:** `docs/WORKER_CONTROL_VI.md`; policy
+  `worker_stale_after_s` (default 300) for `worker_watch` / `aof watch`.
 
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo

@@ -779,7 +779,17 @@ def _call(rid,p):
                 _state["approval_pending"] = True
             elif ev in ("approved", "approval_granted"):
                 _state["approval_pending"] = False
-            _audit({"event":ev,"data":a.get("data") or {}}); return _tool_ok(rid,{"ok":True})
+            data = a.get("data") or {}
+            # F3-1/F3-3: error ledger via session_log event=error (no new tool).
+            if ev == "error":
+                from core.errors_ledger import record_error
+                er = record_error(data if isinstance(data, dict) else {},
+                                  session=_state.get("session_id") or SESSION_ID)
+                _audit({"event": ev, "data": data, "error_ledger": er})
+                if er.get("refused"):
+                    return _tool_ok(rid, er, text=er.get("reason"))
+                return _tool_ok(rid, er)
+            _audit({"event":ev,"data":data}); return _tool_ok(rid,{"ok":True})
         if n=="status_report":
             # Deliberately NOT gated: a blocked operator most needs to see why.
             return _tool_ok(rid,None,text=_status_report(a.get("lang")))
@@ -846,8 +856,14 @@ def _call(rid,p):
             return _tool_ok(rid,{"ok":True,"task":a.get("task"),"repo":a.get("repo")},
                             text=brief)
         if n=="worker_watch":
-            r=heartbeat_mod.check(a["path"],
-                                  int(a.get("stale_after_s") or heartbeat_mod.DEFAULT_STALE_AFTER_S))
+            pol=_workspace_policy()
+            try:
+                pol_stale=int(pol.get("worker_stale_after_s") or heartbeat_mod.DEFAULT_STALE_AFTER_S)
+            except (TypeError, ValueError):
+                pol_stale=heartbeat_mod.DEFAULT_STALE_AFTER_S
+            stale=a.get("stale_after_s")
+            stale_s=int(stale) if stale is not None else pol_stale
+            r=heartbeat_mod.check(a["path"], stale_s)
             r["ok"]=r["status"]=="fresh"
             r["message"]=heartbeat_mod.format_check(r,a.get("lang"))
             return _tool_ok(rid,r)

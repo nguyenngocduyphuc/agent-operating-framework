@@ -29,6 +29,7 @@ docs/
   QUICKSTART_VI.md            5 phút bắt đầu
   VONG_LAP_NO_CODE_VI.md      9 bước máy + nghiệm thu
   OPERATOR_WORKFLOW_VI.md     vòng vận hành hằng ngày
+  WORKER_CONTROL_VI.md        4 luật kiểm soát worker (đo được)
   PRODUCT_DIRECTION_V03.md    định hướng sản phẩm
   REWIRE_MAP_AOF_SKILL.md     strangler /aof → core
   PLAN_REVIEW_STANDARD.md     chuẩn review plan

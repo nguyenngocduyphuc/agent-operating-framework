@@ -174,6 +174,7 @@ def test_every_tool_answers_with_the_envelope(tmp_path):
             "session_handoff": {"since_hours": 1},
             "worker_watch": {"path": str(tmp_path / "nope.log")},
             "aof_resume": {},
+            "estate_report": {"days": 1, "lang": "en"},
         }
         for i, tool in enumerate(tools):
             resp = client.request(
@@ -187,8 +188,16 @@ def test_every_tool_answers_with_the_envelope(tmp_path):
         assert sessions.is_dir(), "recap/handoff did not land next to the bound repo"
         assert any(p.suffix == ".html" for p in sessions.iterdir())
         assert any(p.suffix == ".md" for p in sessions.iterdir())
-        assert not (tmp_path / "docs" / "sessions").exists(), (
-            "recap/handoff leaked into AOF_WORKSPACE instead of the bound repo"
+        # Handoff/recap must not land in AOF_WORKSPACE; estate auto-file may.
+        leaked = tmp_path / "docs" / "sessions"
+        if leaked.exists():
+            names = {p.name for p in leaked.iterdir()}
+            assert names <= {"HIEU_QUA_HOM_NAY.md", "HIEU_QUA_HOM_NAY.html"}, (
+                f"recap/handoff leaked into AOF_WORKSPACE: {names}"
+            )
+        assert not any(
+            p.suffix in (".md", ".html") and p.name.startswith(("HANDOFF_", "RECAP_"))
+            for p in (leaked.iterdir() if leaked.exists() else [])
         )
     finally:
         client.close()

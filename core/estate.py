@@ -10,6 +10,7 @@ each). ``aof estate-report`` builds a live window without requiring a prior coll
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -375,6 +376,118 @@ def write_estate_snapshot(report: dict[str, Any] | None = None, window_hours: fl
     latest = estate_dir() / "latest.json"
     latest.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return str(path)
+
+
+def format_estate_pulse(
+    report: dict[str, Any] | None = None,
+    lang: str | None = None,
+    window_hours: float = 24,
+) -> str:
+    """Very short plain-language pulse for no-code operators (no CLI jargon)."""
+    report = report or build_estate_report(window_hours=window_hours)
+    k = report.get("kpis") or {}
+    vi = (lang or "vi") != "en"
+    pws = report.get("per_workspace") or {}
+    # top 3 workspaces by productive sessions
+    top_ws = sorted(
+        pws.items(),
+        key=lambda kv: (-(kv[1].get("productive") or 0), -(kv[1].get("sessions") or 0)),
+    )[:3]
+
+    if vi:
+        lines = [
+            f"## Hiệu quả {int(window_hours)} giờ (tự động)",
+            f"- Phiên thật / nhiễu: {k.get('sessions_productive')} / {k.get('sessions_noise')}",
+            f"- Preflight ổn: {k.get('preflight_clear')} · bị chặn: {k.get('preflight_blocked')}",
+            f"- Kiểm chứng fail: {k.get('verify_fail')} "
+            f"(tỷ lệ {k.get('verify_fail_rate')})",
+            f"- Xong / Bị chặn: {k.get('done')} / {k.get('blocked')}",
+            f"- Bàn giao / Tiếp phiên: {k.get('handoffs')} / {k.get('resumes')}",
+            f"- Lỗi đang mở: {k.get('open_errors')}",
+        ]
+        if top_ws:
+            lines.append("- Workspace (cmux/path):")
+            for key, info in top_ws:
+                short = key if len(key) < 40 else key[:18] + "…" + key[-10:]
+                tag = "cmux" if info.get("uses_cmux") else "path"
+                lines.append(
+                    f"  · [{tag}] {short}: thật={info.get('productive')} "
+                    f"bàn giao={info.get('handoffs')} resume={info.get('resumes')}"
+                )
+        lines.append(
+            "→ Không cần gõ lệnh. File mới nhất: ~/.aof/estate/HIEU_QUA_HOM_NAY.md"
+        )
+        return "\n".join(lines)
+
+    lines = [
+        f"## Last {int(window_hours)}h effectiveness (automatic)",
+        f"- Real / noise sessions: {k.get('sessions_productive')} / {k.get('sessions_noise')}",
+        f"- Preflight clear / blocked: {k.get('preflight_clear')} / {k.get('preflight_blocked')}",
+        f"- Verify fails: {k.get('verify_fail')} (rate {k.get('verify_fail_rate')})",
+        f"- Done / Blocked: {k.get('done')} / {k.get('blocked')}",
+        f"- Handoff / Resume: {k.get('handoffs')} / {k.get('resumes')}",
+        f"- Open errors: {k.get('open_errors')}",
+    ]
+    if top_ws:
+        lines.append("- Workspaces:")
+        for key, info in top_ws:
+            short = key if len(key) < 40 else key[:18] + "…" + key[-10:]
+            lines.append(
+                f"  · {short}: real={info.get('productive')} "
+                f"handoff={info.get('handoffs')} resume={info.get('resumes')}"
+            )
+    lines.append("→ No CLI needed. Latest file: ~/.aof/estate/HIEU_QUA_HOM_NAY.md")
+    return "\n".join(lines)
+
+
+def publish_no_code_estate(
+    window_hours: float = 24,
+    lang: str | None = None,
+    also_snapshot: bool = True,
+) -> dict[str, str]:
+    """Write plain-language daily file + optional JSON snapshot. No user CLI.
+
+    Paths:
+      ~/.aof/estate/HIEU_QUA_HOM_NAY.md  (always)
+      $AOF_WORKSPACE/docs/sessions/HIEU_QUA_HOM_NAY.md  (if AOF_WORKSPACE set)
+    """
+    report = build_estate_report(window_hours=window_hours)
+    paths: dict[str, str] = {}
+    if also_snapshot:
+        paths["snapshot"] = write_estate_snapshot(report, window_hours=window_hours)
+    body = format_estate_pulse(report, lang=lang, window_hours=window_hours)
+    # Full readable page for no-code: pulse + short top workspaces already in pulse
+    header = (
+        f"# Hiệu quả AOF — cập nhật tự động\n\n"
+        f"_Cập nhật: {datetime.now().strftime('%Y-%m-%d %H:%M')}_ · "
+        f"cửa sổ {int(window_hours)}h\n\n"
+        if (lang or "vi") != "en"
+        else
+        f"# AOF effectiveness — auto-updated\n\n"
+        f"_Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}_ · "
+        f"window {int(window_hours)}h\n\n"
+    )
+    text = header + body + "\n"
+    ensure_audit_dir()
+    estate_dir().mkdir(parents=True, exist_ok=True)
+    home_path = estate_dir() / "HIEU_QUA_HOM_NAY.md"
+    home_path.write_text(text, encoding="utf-8")
+    paths["home"] = str(home_path)
+    # latest.html for double-click open
+    html_path = estate_dir() / "HIEU_QUA_HOM_NAY.html"
+    html_path.write_text(format_estate_html(report, lang), encoding="utf-8")
+    paths["html"] = str(html_path)
+    ws = os.environ.get("AOF_WORKSPACE")
+    if ws:
+        try:
+            sess = Path(ws) / "docs" / "sessions"
+            sess.mkdir(parents=True, exist_ok=True)
+            wp = sess / "HIEU_QUA_HOM_NAY.md"
+            wp.write_text(text, encoding="utf-8")
+            paths["workspace"] = str(wp)
+        except OSError:
+            pass
+    return paths
 
 
 def format_estate_report(report: dict[str, Any], lang: str | None = None) -> str:

@@ -92,6 +92,22 @@ def test_build_estate_kpis(aof_home):
     assert "verify" in text.lower() or "fail_rate" in text
 
 
+def test_publish_no_code_file(aof_home, tmp_path, monkeypatch):
+    _seed(aof_home)
+    monkeypatch.setenv("AOF_WORKSPACE", str(tmp_path / "ws"))
+    (tmp_path / "ws").mkdir()
+    from core.estate import format_estate_pulse, publish_no_code_estate
+    paths = publish_no_code_estate(window_hours=24, lang="vi")
+    home = Path(paths["home"])
+    assert home.is_file()
+    body = home.read_text(encoding="utf-8")
+    assert "Hiệu quả" in body or "tự động" in body
+    assert Path(paths["html"]).is_file()
+    assert "workspace" in paths
+    pulse = format_estate_pulse(lang="vi", window_hours=24)
+    assert "Hiệu quả" in pulse
+
+
 def test_snapshot_and_cli(aof_home, tmp_path):
     _seed(aof_home)
     path = write_estate_snapshot(window_hours=24)

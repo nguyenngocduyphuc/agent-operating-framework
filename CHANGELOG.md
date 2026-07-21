@@ -34,6 +34,9 @@
 - **Workspace/cmux identity on audit:** `session_start` + `preflight` capture
   `CMUX_WORKSPACE_ID` / surface / AOF_WORKSPACE / cwd. `estate-report` groups
   **per workspace** so multi-cmux effectiveness is measurable from this deploy on.
+- **No-code auto effectiveness:** every MCP session_end refreshes
+  `~/.aof/estate/HIEU_QUA_HOM_NAY.md` (+ html); `status_report` embeds a 24h pulse;
+  new MCP tool `estate_report` (never gated). Operators do not need CLI.
 
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo

@@ -112,9 +112,12 @@ def test_handoff_writes_into_bound_repo_not_workspace(tmp_path):
     # Same-second calls can share a filename (HANDOFF_<stamp>.md) -- that is
     # fine, they live in different directories. is_dir()+non-empty above,
     # plus the leak checks below, are what actually prove separation.
-    assert not (tmp_path / "docs" / "sessions").exists(), (
-        "handoff leaked into the shared AOF_WORKSPACE instead of the bound repo"
-    )
+    leaked = tmp_path / "docs" / "sessions"
+    if leaked.exists():
+        names = {p.name for p in leaked.iterdir()}
+        assert names <= {"HIEU_QUA_HOM_NAY.md", "HIEU_QUA_HOM_NAY.html"}, (
+            f"handoff leaked into the shared AOF_WORKSPACE: {names}"
+        )
 
 
 def test_handoff_repeated_in_same_repo_is_idempotent_location(tmp_path):
@@ -130,6 +133,9 @@ def test_handoff_repeated_in_same_repo_is_idempotent_location(tmp_path):
 
     _handoff_via_mcp(repo, workspace=tmp_path, aof_home=aof_home)
     assert sessions.is_dir() and list(sessions.iterdir()), "second call did not land in the repo"
-    assert not (tmp_path / "docs" / "sessions").exists(), (
-        "second call drifted into the shared AOF_WORKSPACE"
-    )
+    leaked = tmp_path / "docs" / "sessions"
+    if leaked.exists():
+        names = {p.name for p in leaked.iterdir()}
+        assert names <= {"HIEU_QUA_HOM_NAY.md", "HIEU_QUA_HOM_NAY.html"}, (
+            f"second call drifted into the shared AOF_WORKSPACE: {names}"
+        )

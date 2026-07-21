@@ -79,6 +79,20 @@ def main() -> None:
     p_improve.add_argument("--lang", choices=["vi", "en"], default=None)
     p_improve.add_argument("--json", action="store_true", dest="as_json")
 
+    p_estate = sub.add_parser(
+        "estate-report",
+        help="Estate effectiveness KPIs from AOF ledgers (multi-repo/host window).",
+    )
+    p_estate.add_argument("--days", type=float, default=7, help="look-back days (default 7)")
+    p_estate.add_argument("--window-hours", type=float, default=None,
+                          help="override --days with an hour window")
+    p_estate.add_argument("--lang", choices=["vi", "en"], default=None)
+    p_estate.add_argument("--json", action="store_true", dest="as_json")
+    p_estate.add_argument("--html", action="store_true", help="print HTML instead of text")
+    p_estate.add_argument("--snapshot", action="store_true",
+                          help="also write JSON under ~/.aof/estate/snapshots/")
+    p_estate.add_argument("--out", default=None, help="write report to this path")
+
     args = parser.parse_args()
 
     if args.command == "start-mcp-server":
@@ -186,6 +200,37 @@ def main() -> None:
             })
         print(json.dumps(result, ensure_ascii=False, indent=2) if args.as_json
               else format_proposal(result, args.lang))
+        sys.exit(0)
+    elif args.command == "estate-report":
+        import os as _os
+
+        from core.estate import (
+            build_estate_report,
+            format_estate_html,
+            format_estate_report,
+            write_estate_snapshot,
+        )
+        hours = args.window_hours if args.window_hours is not None else float(args.days) * 24.0
+        report = build_estate_report(window_hours=hours)
+        snap_path = None
+        if args.snapshot:
+            snap_path = write_estate_snapshot(report)
+            report["snapshot_path"] = snap_path
+        if args.as_json:
+            body = json.dumps(report, ensure_ascii=False, indent=2)
+        elif args.html:
+            body = format_estate_html(report, args.lang)
+        else:
+            body = format_estate_report(report, args.lang)
+            if snap_path:
+                body += f"\nsnapshot: {snap_path}\n"
+        if args.out:
+            _os.makedirs(_os.path.dirname(args.out) or ".", exist_ok=True)
+            with open(args.out, "w", encoding="utf-8") as fh:
+                fh.write(body if body.endswith("\n") else body + "\n")
+            print(args.out)
+        else:
+            print(body, end="" if body.endswith("\n") else "\n")
         sys.exit(0)
     elif args.command == "watch":
         import os as _os

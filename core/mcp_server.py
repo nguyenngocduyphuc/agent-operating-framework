@@ -680,6 +680,18 @@ def _call(rid,p):
                                    "lease_info": lr})
                     r["lease"] = {"status": lr.get("status")}
                     _audit({"event": "lease", "task": task, "status": lr.get("status")})
+            # Estate telemetry: always record preflight outcome + bound identity.
+            _audit({
+                "event": "preflight",
+                "status": r.get("status"),
+                "workspace": r.get("workspace"),
+                "repo": r.get("repo"),
+                "branch": r.get("branch"),
+                "task": r.get("task") or a.get("task"),
+                "cwd": _state.get("bound_cwd") or a.get("cwd"),
+                "lane": r.get("lane") or _state.get("bound_lane"),
+                "exit_code": r.get("exit_code"),
+            })
             return _tool_ok(rid,r)
         if n=="check_contract":
             _state["last_verify_status"] = None

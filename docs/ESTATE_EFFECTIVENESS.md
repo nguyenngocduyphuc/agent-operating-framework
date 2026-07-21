@@ -42,9 +42,29 @@ Mỗi `preflight` MCP ghi audit:
 → estate mới “thấy” workspace/repo. Bản audit cũ trước thay đổi này
 không có preflight rows (KPI preflight = 0 cho đến khi có traffic mới).
 
+## Multi-workspace identity (từ 2026-07-21)
+
+Mỗi `session_start` / `preflight` ghi host context (nếu env có):
+
+| Field | Nguồn |
+|---|---|
+| `aof_workspace` | `$AOF_WORKSPACE` |
+| `cwd` | process cwd / bound cwd |
+| `cmux_workspace_id` | `$CMUX_WORKSPACE_ID` |
+| `cmux_surface_id` | `$CMUX_SURFACE_ID` |
+| `cmux_panel_id` / `cmux_tab_id` | cmux env |
+| `cmux_agent_kind` / `cmux_agent_cwd` | `$CMUX_AGENT_LAUNCH_*` |
+
+`aof estate-report` section **Per workspace** groups sessions by
+`cmux_workspace_id` (preferred) else AOF workspace path.
+
+**From this deploy forward**, multi-workspace stats work for sessions launched
+inside cmux (env present). Older audit rows without these fields stay under
+`(unknown)` or path-only keys.
+
 ## Ranh giới
 
-- **Không** nhét cmux vào core. Join cmux workspace map = adapter NP_AI sau.  
+- **Không** nhét logic điều khiển cmux vào core — chỉ **đọc env identity**.  
 - **Không** claim ROI n≥30 từ estate-report.  
 - Multi-host: sau này `AOF_ESTATE_SOURCES` (nhiều audit dir) — chưa ship.  
 

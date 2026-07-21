@@ -28,6 +28,14 @@ Idempotent -- safe to re-run. The tool stays in your PATH; the project keeps onl
 
 **No-code daily use (no CLI):** with MCP connected, ask for status (`status_report`) — it includes a 24h effectiveness pulse. Auto file: `~/.aof/estate/HIEU_QUA_HOM_NAY.md` (refreshed on every MCP session end).
 
+**Track effectiveness on GitHub:** from a machine that runs AOF, post KPIs to the pinned tracker issue:
+
+```bash
+bash scripts/post_effectiveness_to_github.sh 7
+```
+
+See `docs/MASTER_PLAN.md` and `docs/metrics/README.md`.
+
 ## Measured results (3-arm causal benchmark, n=105 runs, preregistered rule)
 
 - **Scope containment: 100% of out-of-scope requests blocked vs 43% bare** (p<0.05, Fisher one-sided, replicated across two independent measurements).

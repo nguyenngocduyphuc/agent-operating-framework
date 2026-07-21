@@ -40,6 +40,8 @@ docs/
   BYPASS_AND_KARPATHY.md      Karpathy default + bản đồ bypass
   CLEAN_MACHINE_AUDIT_*.md    audit clone-only (publish score)
   plans/AOF_BEST_PATH_90D.md  kế hoạch 90 ngày tốt nhất
+  MASTER_PLAN.md              master plan toàn diện + GitHub tracking
+  metrics/                    KPI snapshots + how-to post lên GitHub
   history/INDEX.md            dòng thời gian (chưng cất)
   decisions/                  decision records
   plans/                      ExecPlan + context (working; có thể STALE)

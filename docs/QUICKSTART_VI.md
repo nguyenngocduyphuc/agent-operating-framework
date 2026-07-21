@@ -10,6 +10,10 @@ Bạn chỉ cần trả lời được 4 câu khi máy làm việc cho mình:
 
 AOF trả lời cả 4 câu đó, tự động.
 
+**Hiệu quả dùng AOF (không cần gõ lệnh):** khi trợ lý đã gắn MCP AOF,
+hỏi “trạng thái” / gọi `status_report` — máy tự kèm khối **Hiệu quả 24 giờ**.
+File luôn có sẵn để mở: `~/.aof/estate/HIEU_QUA_HOM_NAY.md` (cập nhật mỗi phiên).
+
 ## Bước 1 — Cài (1 lần duy nhất)
 
 Mở Terminal, dán từng dòng:

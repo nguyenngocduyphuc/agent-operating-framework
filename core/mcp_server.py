@@ -118,6 +118,14 @@ TOOLS = [
         "task":{"type":"string"},
         "repo":{"type":"string","description":"working-tree path or repo_key"},
         "lang":{"type":"string","enum":["vi","en"]}}}},
+    {"name":"estate_report",
+     "description":"Hiệu quả vận hành AOF (tự động, tiếng thường): phiên thật/nhiễu, "
+                   "preflight, verify, bàn giao, theo workspace cmux. Không cần gõ CLI. "
+                   "Ghi file ~/.aof/estate/HIEU_QUA_HOM_NAY.md. Never gated.",
+     "inputSchema":{"type":"object","properties":{
+        "days":{"type":"number","minimum":0.04,"maximum":30,
+                "description":"look-back days (default 1)"},
+        "lang":{"type":"string","enum":["vi","en"]}}}},
 ]
 
 # Explicit gate allowlist — unknown gates never execute as commands
@@ -547,6 +555,15 @@ def _status_report(lang=None):
     nxt = next((k for k, _label in t["steps"] if not flags[k]), "done")
     lines.append("")
     lines.append(f"{t['next']}: {t['next_map'][nxt]}")
+    # No-code pulse: effectiveness without asking the operator to run CLI.
+    try:
+        from core.estate import format_estate_pulse, publish_no_code_estate
+        # Refresh the daily file quietly; surface a short block in the report.
+        publish_no_code_estate(window_hours=24, lang=lang, also_snapshot=False)
+        lines.append("")
+        lines.append(format_estate_pulse(lang=lang, window_hours=24))
+    except Exception:
+        pass
     return "\n".join(lines)
 
 
@@ -880,6 +897,25 @@ def _call(rid,p):
             _audit({"event":"aof_resume","task":a.get("task"),"repo":a.get("repo")})
             return _tool_ok(rid,{"ok":True,"task":a.get("task"),"repo":a.get("repo")},
                             text=brief)
+        if n=="estate_report":
+            # Never gated: CEO/no-code operators must see effectiveness anytime.
+            from core.estate import (
+                build_estate_report,
+                format_estate_pulse,
+                format_estate_report,
+                publish_no_code_estate,
+            )
+            days=float(a.get("days") or 1)
+            hours=max(days, 0.04)*24.0
+            lang=a.get("lang")
+            report=build_estate_report(window_hours=hours)
+            paths=publish_no_code_estate(window_hours=hours, lang=lang, also_snapshot=True)
+            pulse=format_estate_pulse(report, lang=lang, window_hours=hours)
+            detail=format_estate_report(report, lang)
+            text=pulse+"\n\n"+detail
+            _audit({"event":"estate_report","days":days,"paths":paths})
+            return _tool_ok(rid,{"ok":True,"paths":paths,"kpis":report.get("kpis")},
+                            text=text)
         if n=="worker_watch":
             pol=_workspace_policy()
             try:
@@ -1040,7 +1076,13 @@ def main():
     # by a lease whose holder simply exited.
     if _state.get("lease_task"):
         lease_mod.release(_state["lease_task"], _state.get("lease_cwd") or os.getcwd(), SESSION_ID)
-    _audit({"event":"session_end"})
+    _audit({"event": "session_end", **capture_host_context()})
+    # Auto-refresh no-code effectiveness file — operator never runs CLI.
+    try:
+        from core.estate import publish_no_code_estate
+        publish_no_code_estate(window_hours=24, also_snapshot=True)
+    except Exception:
+        pass
 
 if __name__=="__main__":
     main()

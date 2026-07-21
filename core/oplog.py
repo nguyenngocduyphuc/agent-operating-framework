@@ -18,7 +18,7 @@ import time
 from datetime import datetime
 from typing import Any
 
-from core.enforcement import audit_file, decision_file
+from core.enforcement import audit_dir, audit_file, decision_file
 
 _T = {
     "vi": {
@@ -244,6 +244,7 @@ def render_html(report: dict[str, Any], lang: str | None = None) -> str:
 _HANDOFF_T = {
     "vi": {
         "title": "# BÀN GIAO PHIÊN (HANDOFF)",
+        "recap_link": "Recap (HTML)",
         "window": "Cửa sổ",
         "done": "## Đã xong — có bằng chứng",
         "blocked": "## Đóng dạng bị chặn (phiên sau xử tiếp)",
@@ -259,6 +260,7 @@ _HANDOFF_T = {
     },
     "en": {
         "title": "# SESSION HANDOFF",
+        "recap_link": "Recap (HTML)",
         "window": "Window",
         "done": "## Done — with proof",
         "blocked": "## Closed as blocked (next session continues)",
@@ -315,6 +317,202 @@ def t_contract(b: dict[str, Any]) -> str:
 def default_session_dir(base: str) -> str:
     """docs/sessions/ under the workspace — the per-session docs home."""
     return os.path.join(base, "docs", "sessions")
+
+
+def write_session_bundle(
+    outdir: str, report: dict[str, Any], lang: str | None = None, stamp: str | None = None,
+) -> dict[str, str]:
+    """Write a handoff .md + recap .html sharing one stamp, cross-linked.
+
+    F2 (AOF v0.4): one call = the whole handoff. Before this, a session had to
+    remember to run both `session_recap` and `session_handoff` separately, and
+    nothing tied the two files together. Now the handoff always carries a
+    working link to its own recap, and both share a timestamp so an index
+    (F1) can key on one stamp for the pair.
+    """
+    t = _HANDOFF_T[lang if lang in ("vi", "en") else "vi"]
+    stamp = stamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    recap_name = f"RECAP_{stamp}.html"
+    handoff_name = f"HANDOFF_{stamp}.md"
+    os.makedirs(outdir, exist_ok=True)
+
+    recap_content = render_html(report, lang)
+    body = format_handoff(report, lang)
+    title, _, rest = body.partition("\n")
+    handoff_content = f"{title}\n\n{t['recap_link']}: ./{recap_name}\n{rest}"
+
+    recap_path = os.path.join(outdir, recap_name)
+    handoff_path = os.path.join(outdir, handoff_name)
+    with open(recap_path, "w", encoding="utf-8") as fh:
+        fh.write(recap_content)
+    with open(handoff_path, "w", encoding="utf-8") as fh:
+        fh.write(handoff_content)
+    return {"handoff_path": handoff_path, "recap_path": recap_path, "stamp": stamp}
+
+
+def handoff_index_path() -> str:
+    """Central append-only handoff index (one writer, one schema).
+
+    Lives under ``audit_dir()/handoffs/index.jsonl`` so ``AOF_AUDIT_DIR`` keeps
+    tests and multi-machine hosts isolated (defaults to ``~/.aof/...``).
+    """
+    return str(audit_dir() / "handoffs" / "index.jsonl")
+
+
+def append_handoff_index(
+    repo_identity_path: str,
+    repo_key: str,
+    branch: str,
+    task: str | None,
+    bundle: dict[str, str],
+    summary: dict[str, Any] | None = None,
+) -> str:
+    """Append one index row after a handoff bundle is written. Sole writer."""
+    idx_path = audit_dir() / "handoffs" / "index.jsonl"
+    idx_path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "ts": time.time(),
+        "repo_identity": repo_identity_path,
+        "repo_key": repo_key,
+        "branch": branch or "",
+        "task": task,
+        "handoff_path": bundle["handoff_path"],
+        "recap_path": bundle["recap_path"],
+        "stamp": bundle.get("stamp"),
+        "summary": summary or {},
+    }
+    with open(idx_path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return str(idx_path)
+
+
+def load_handoff_index() -> list[dict[str, Any]]:
+    """Read the full handoff index (best-effort; corrupt lines skipped)."""
+    path = audit_dir() / "handoffs" / "index.jsonl"
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def select_handoff_row(
+    rows: list[dict[str, Any]],
+    task: str | None = None,
+    repo: str | None = None,
+) -> dict[str, Any] | None:
+    """Pick the newest matching index row (by ts). ``repo`` matches path or key."""
+    if not rows:
+        return None
+    candidates = rows
+    if task:
+        candidates = [r for r in candidates if (r.get("task") or "") == task]
+    if repo:
+        repo_norm = os.path.realpath(os.path.expanduser(repo))
+        filtered = []
+        for r in candidates:
+            ident = str(r.get("repo_identity") or "")
+            key = str(r.get("repo_key") or "")
+            handoff = str(r.get("handoff_path") or "")
+            if (
+                key == repo
+                or ident in (repo, repo_norm)
+                or handoff.startswith(repo_norm + os.sep)
+                or handoff.startswith(repo.rstrip("/") + "/")
+            ):
+                filtered.append(r)
+                continue
+            # Allow matching the working-tree root stored indirectly via handoff path.
+            try:
+                if repo_norm and repo_norm in os.path.realpath(handoff):
+                    filtered.append(r)
+            except OSError:
+                pass
+        candidates = filtered
+    if not candidates:
+        return None
+    return max(candidates, key=lambda r: float(r.get("ts") or 0))
+
+
+def format_resume_brief(
+    task: str | None = None,
+    repo: str | None = None,
+    lang: str | None = None,
+) -> str:
+    """Build a plain-text RESUME BRIEF from the handoff index + file contents."""
+    vi = (lang or "vi") != "en"
+    rows = load_handoff_index()
+    row = select_handoff_row(rows, task=task, repo=repo)
+    if row is None:
+        if vi:
+            return (
+                "# RESUME BRIEF\n\n"
+                "Chưa có handoff trong index. Chạy `aof handoff` hoặc tool "
+                "`session_handoff` trong phiên trước, rồi gọi lại `aof resume`.\n"
+            )
+        return (
+            "# RESUME BRIEF\n\n"
+            "No handoff in the index yet. Run `aof handoff` / `session_handoff` "
+            "in a prior session, then call `aof resume` again.\n"
+        )
+
+    handoff_path = row.get("handoff_path") or ""
+    body = ""
+    if handoff_path and os.path.isfile(handoff_path):
+        try:
+            with open(handoff_path, encoding="utf-8") as fh:
+                body = fh.read().strip()
+        except OSError as exc:
+            body = f"(could not read handoff: {exc})"
+    else:
+        body = f"(handoff file missing: {handoff_path})"
+
+    rules = (
+        "## Luật bắt buộc khi tiếp tục\n"
+        "1. History Gate — đọc docs/HISTORY_GOVERNANCE.md trước đổi semantics.\n"
+        "2. preflight lại trên đúng repo/branch; không tin trạng thái phiên cũ.\n"
+        "3. verify_gate do orchestrator chạy — worker không tự chấm DoD.\n"
+        "4. Self-improve chỉ đề xuất; không tự merge policy / không đụng tracker.\n"
+        if vi
+        else
+        "## Required rules before continuing\n"
+        "1. History Gate — read docs/HISTORY_GOVERNANCE.md before semantic changes.\n"
+        "2. Re-run preflight on the correct repo/branch; do not trust old session state.\n"
+        "3. Orchestrator owns verify_gate — workers never self-grade DoD.\n"
+        "4. Self-improve proposes only; never auto-merge policy or touch trackers.\n"
+    )
+    next_cmds = (
+        "## Lệnh làm tiếp\n"
+        f"- Recap: {row.get('recap_path') or '(none)'}\n"
+        f"- Handoff: {handoff_path}\n"
+        "- `aof doctor` rồi preflight → contract → verify → evidence\n"
+        if vi
+        else
+        "## Commands to continue\n"
+        f"- Recap: {row.get('recap_path') or '(none)'}\n"
+        f"- Handoff: {handoff_path}\n"
+        "- `aof doctor` then preflight → contract → verify → evidence\n"
+    )
+    header = (
+        f"# RESUME BRIEF\n\n"
+        f"- task: {row.get('task') or '(none)'}\n"
+        f"- branch: {row.get('branch') or '(unknown)'}\n"
+        f"- repo_key: {row.get('repo_key') or ''}\n"
+        f"- repo_identity: {row.get('repo_identity') or ''}\n"
+        f"- ts: {row.get('ts')}\n\n"
+    )
+    return f"{header}{rules}\n{next_cmds}\n---\n\n{body}\n"
 
 
 def format_digest(report: dict[str, Any], lang: str | None = None) -> str:

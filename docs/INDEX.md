@@ -9,33 +9,46 @@ NP_AI (Asana, cmux, artifact nội bộ) KHÔNG copy vào — chỉ chưng cất
 | Bạn là | Đọc |
 |---|---|
 | Người dùng mới (không code) | `QUICKSTART_VI.md` → `VONG_LAP_NO_CODE_VI.md` |
-| Người vận hành hằng ngày | `OPERATOR_WORKFLOW_VI.md` |
-| Dev tích hợp / reviewer | `../README.md` → `ALIGNMENT_WITH_HISTORY_20260720.md` → `decisions/` |
-| Người phát triển AOF | **BẮT BUỘC** `HISTORY_GOVERNANCE.md` (History Gate) trước mọi thay đổi |
+| Người vận hành hằng ngày | `OPERATOR_WORKFLOW_VI.md` → `ENGINEERING_WORKFLOW.md` (kỹ thuật) |
+| Dev / reviewer / agent | **`ARCHITECTURE.md`** → `HISTORY_GOVERNANCE.md` → `DOCUMENT_GOVERNANCE.md` |
+| Người phát triển AOF | History Gate trước mọi thay đổi semantics; `CONTRIBUTING.md` ở root |
+| Wave v0.4 đang chạy | `plans/AOF_V04_AUTOHANDOFF_EXECPLAN_20260721.md` + `plans/AOF_V04_AUTOHANDOFF_CONTEXT.md` (đối chiếu ARCHITECTURE nếu COPY PROMPT lệch) |
 
 ## Cấu trúc
 
 ```
-core/           động cơ: preflight, contract(+Karpathy), gates, lease, lanes,
-                mcp_server (8 tools), doctor, oplog (log/recap/handoff), heartbeat
-adapters/       tracker adapters (Asana)
-tests/          132 test: unit + adversarial + policy-compat + lanes
-                + no-shadow-import + E2E user journey (hành trình 9 bước thật)
+core/           động cơ: preflight, contract, gates, lease, lanes,
+                mcp_server (TOOLS catalog — đếm động), doctor, oplog, heartbeat
+adapters/       tracker adapters (Asana) — không phải lõi portable
+tests/          unit + adversarial + policy-compat + lanes + E2E + multirepo
 docs/
-  QUICKSTART_VI.md            5 phút bắt đầu, không cần biết code
-  VONG_LAP_NO_CODE_VI.md      9 bước máy tự chạy + điều kiện nghiệm thu
-  OPERATOR_WORKFLOW_VI.md     vòng vận hành + bảng giá trị đo được
+  ARCHITECTURE.md             lớp, ranh giới, identity write vs key
+  ENGINEERING_WORKFLOW.md     vòng dev + self-improve + stop rules
+  DOCUMENT_GOVERNANCE.md      luật docs production (chống stale/landmine)
+  HISTORY_GOVERNANCE.md       5 luật History Gate
+  QUICKSTART_VI.md            5 phút bắt đầu
+  VONG_LAP_NO_CODE_VI.md      9 bước máy + nghiệm thu
+  OPERATOR_WORKFLOW_VI.md     vòng vận hành hằng ngày
   PRODUCT_DIRECTION_V03.md    định hướng sản phẩm
-  ALIGNMENT_WITH_HISTORY_*.md đối chiếu với toàn bộ lịch sử /aof
-  HISTORY_GOVERNANCE.md       5 luật quản trị lịch sử (History Gate)
-  REWIRE_MAP_AOF_SKILL.md     strangler map skill /aof → core
-  history/INDEX.md            dòng thời gian sản phẩm (chưng cất, trỏ nguồn)
+  REWIRE_MAP_AOF_SKILL.md     strangler /aof → core
+  PLAN_REVIEW_STANDARD.md     chuẩn review plan
+  ASSESSMENT_*.md             thẩm định có bằng chứng
+  history/INDEX.md            dòng thời gian (chưng cất)
   decisions/                  decision records
-  examples/recap_example.html recap HTML mẫu (sinh từ dữ liệu thật)
+  plans/                      ExecPlan + context (working; có thể STALE)
+  examples/                   mẫu recap
 ```
 
 ## Sự thật vận hành (đối chiếu được)
 
-Mọi claim trong docs đối chiếu được bằng: `python3 -m pytest` (từ repo này),
-`aof doctor`, `aof log`. Claim đo lường: xem README mục "Measured results" —
-trong đúng ràng buộc trung thực đã khóa tại CAUSAL-VERDICT 2026-07-16.
+Mọi claim trong docs đối chiếu bằng lệnh trong **repo này**:
+
+```bash
+python3 -m pytest -q
+ruff check core/ tests/
+PYTHONPATH=. python3 -m core.doctor --json   # từ canonical tree
+```
+
+Claim đo lường công bố: README “Measured results” trong đúng ràng buộc
+CAUSAL-VERDICT 2026-07-16. Không hardcode số MCP tools trong prose — xem
+`len(TOOLS)` / output doctor.

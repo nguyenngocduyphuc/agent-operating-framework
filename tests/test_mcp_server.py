@@ -137,13 +137,25 @@ def test_tools_call_result_uses_mcp_content_envelope(client):
 
 
 def test_every_tool_answers_with_the_envelope(tmp_path):
-    """All 12 tools, success or refusal, must be readable by a client."""
+    """Every catalog tool, success or refusal, must be readable by a client."""
+    # F1 (v0.4): preflight against a real repo distinct from AOF_WORKSPACE, so
+    # this test also proves recap/handoff land next to THAT repo, not the
+    # workspace -- the exact bug F1 fixes. Preflighting against the real
+    # agent-operating-framework checkout here would write test artifacts into
+    # the actual repo once that fix lands, so use an isolated git repo instead.
+    work_repo = tmp_path / "workrepo"
+    work_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=work_repo, check=True)
+    # preflight only binds bound_cwd on status=="clear"; staying on main/master
+    # triggers a warn and leaves bound_cwd unset, so use a feature branch.
+    subprocess.run(["git", "checkout", "-q", "-b", "feat/fixture"], cwd=work_repo, check=True)
     client = _Client(extra_env={"AOF_WORKSPACE": str(tmp_path),
                                 "AOF_AUDIT_DIR": str(tmp_path / "aofhome")})
     try:
         client.request("initialize", req_id=1)
         tools = client.request("tools/list", req_id=2)["result"]["tools"]
-        assert len(tools) == 12, f"expected 12 tools, got {len(tools)}"
+        from core.mcp_server import TOOLS
+        assert len(tools) == len(TOOLS), f"expected {len(TOOLS)} tools, got {len(tools)}"
         args = {
             "check_contract": {"brief": GOOD_BRIEF},
             "verify_gate": {"gate_type": "ruff"},
@@ -151,12 +163,13 @@ def test_every_tool_answers_with_the_envelope(tmp_path):
             "session_log": {"event": "goal"},
             "post_evidence": {"task_gid": "T-1", "summary": "s"},
             "operating_protocol": {"workspace": str(REPO)},
-            "preflight": {"cwd": str(REPO)},
+            "preflight": {"cwd": str(work_repo)},
             "status_report": {"lang": "en"},
             "op_log": {"since_hours": 1},
             "session_recap": {"since_hours": 1},
             "session_handoff": {"since_hours": 1},
             "worker_watch": {"path": str(tmp_path / "nope.log")},
+            "aof_resume": {},
         }
         for i, tool in enumerate(tools):
             resp = client.request(
@@ -164,10 +177,15 @@ def test_every_tool_answers_with_the_envelope(tmp_path):
                 req_id=100 + i,
             )
             envelope(resp)  # raises with a readable message if the envelope is wrong
-        # recap/handoff must land under the WORKSPACE, not the repo
-        sessions = tmp_path / "docs" / "sessions"
+        # F1: recap/handoff must land next to the bound repo (work_repo), not
+        # the parent AOF_WORKSPACE (tmp_path) -- proves nearest_repo() wiring.
+        sessions = work_repo / "docs" / "sessions"
+        assert sessions.is_dir(), "recap/handoff did not land next to the bound repo"
         assert any(p.suffix == ".html" for p in sessions.iterdir())
         assert any(p.suffix == ".md" for p in sessions.iterdir())
+        assert not (tmp_path / "docs" / "sessions").exists(), (
+            "recap/handoff leaked into AOF_WORKSPACE instead of the bound repo"
+        )
     finally:
         client.close()
 

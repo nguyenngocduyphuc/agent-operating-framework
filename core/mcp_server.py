@@ -36,7 +36,7 @@ from core.enforcement import (
     with_stall_warning,
     write_decision,
 )
-from core.preflight import load_policy, workspace_root
+from core.preflight import load_policy, nearest_repo, workspace_root
 
 # Gate timeout bounds. A caller may raise the per-command timeout for slow suites,
 # but never past the ceiling -- an unbounded gate is a hung server.
@@ -108,6 +108,15 @@ TOOLS = [
         "path":{"type":"string"},
         "stale_after_s":{"type":"integer","minimum":10,"maximum":86400},
         "lang":{"type":"string","enum":["vi","en"]}},"required":["path"]}},
+    {"name":"aof_resume",
+     "description":"Load the newest matching handoff from the host index "
+                   "(~/.aof/handoffs/index.jsonl or $AOF_AUDIT_DIR) and return a "
+                   "RESUME BRIEF (content + required rules + next commands). "
+                   "Filter by task and/or repo path; default = newest overall.",
+     "inputSchema":{"type":"object","properties":{
+        "task":{"type":"string"},
+        "repo":{"type":"string","description":"working-tree path or repo_key"},
+        "lang":{"type":"string","enum":["vi","en"]}}}},
 ]
 
 # Explicit gate allowlist — unknown gates never execute as commands
@@ -784,22 +793,58 @@ def _call(rid,p):
             lang=a.get("lang")
             if n=="op_log":
                 return _tool_ok(rid,None,text=oplog_mod.format_digest(report,lang))
-            ws=_state.get("bound_workspace") or os.environ.get("AOF_WORKSPACE") or os.getcwd()
-            stamp=time.strftime("%Y%m%d_%H%M%S")
-            if n=="session_recap":
-                content=oplog_mod.render_html(report,lang); fname=f"RECAP_{stamp}.html"
-            else:
-                content=oplog_mod.format_handoff(report,lang); fname=f"HANDOFF_{stamp}.md"
+            # F1 (v0.4): recap/handoff must land next to the repo being worked
+            # on, not the parent AOF_WORKSPACE — a session in a sub-repo/worktree
+            # used to write into the wrong place. nearest_repo() resolves the
+            # working-tree root for bound_cwd (the checkout you can actually see
+            # docs/sessions/ in) — NOT lease_mod.repo_identity(), which resolves
+            # to the .git directory itself (right for lease hashing, wrong as a
+            # file-write base: it would put docs/sessions/ inside .git/).
+            bound_cwd=_state.get("bound_cwd") or os.getcwd()
+            ws=nearest_repo(bound_cwd) or bound_cwd
             outdir=oplog_mod.default_session_dir(ws)
-            os.makedirs(outdir,exist_ok=True)
-            fpath=os.path.join(outdir,fname)
-            with open(fpath,"w",encoding="utf-8") as fh:
-                fh.write(content)
-            _audit({"event":n,"path":fpath})
-            return _tool_ok(rid,{"ok":True,"path":fpath,
-                                 "summary":{"sessions":report["sessions"],"done":report["done"],
-                                            "blocked":report["blocked"],
-                                            "collisions":report["collisions"]}})
+            summary={"sessions":report["sessions"],"done":report["done"],
+                     "blocked":report["blocked"],"collisions":report["collisions"]}
+            if n=="session_recap":
+                stamp=time.strftime("%Y%m%d_%H%M%S")
+                os.makedirs(outdir,exist_ok=True)
+                fpath=os.path.join(outdir,f"RECAP_{stamp}.html")
+                with open(fpath,"w",encoding="utf-8") as fh:
+                    fh.write(oplog_mod.render_html(report,lang))
+                _audit({"event":n,"path":fpath})
+                return _tool_ok(rid,{"ok":True,"path":fpath,"summary":summary})
+            # session_handoff (F2): one call writes handoff + recap, cross-linked,
+            # sharing one stamp -- never a lone .md with no recap to point to.
+            bundle=oplog_mod.write_session_bundle(outdir,report,lang)
+            # F1-2: central index pointer (identity for keys; nearest_repo for files).
+            try:
+                ident_path, ident_key = lease_mod.repo_identity(bound_cwd)
+            except Exception:
+                ident_path, ident_key = bound_cwd, ""
+            try:
+                br = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=bound_cwd, capture_output=True, text=True, timeout=10,
+                )
+                branch = br.stdout.strip() if br.returncode == 0 else ""
+            except (OSError, subprocess.TimeoutExpired):
+                branch = ""
+            idx = oplog_mod.append_handoff_index(
+                ident_path, ident_key, branch, _state.get("bound_task"), bundle, summary,
+            )
+            _audit({"event":n,"path":bundle["handoff_path"],"recap_path":bundle["recap_path"],
+                    "index":idx})
+            return _tool_ok(rid,{"ok":True,"path":bundle["handoff_path"],
+                                 "recap_path":bundle["recap_path"],"index":idx,
+                                 "summary":summary})
+        if n=="aof_resume":
+            # Never gated: the next session must load context even when blocked.
+            brief=oplog_mod.format_resume_brief(
+                task=a.get("task"), repo=a.get("repo"), lang=a.get("lang"),
+            )
+            _audit({"event":"aof_resume","task":a.get("task"),"repo":a.get("repo")})
+            return _tool_ok(rid,{"ok":True,"task":a.get("task"),"repo":a.get("repo")},
+                            text=brief)
         if n=="worker_watch":
             r=heartbeat_mod.check(a["path"],
                                   int(a.get("stale_after_s") or heartbeat_mod.DEFAULT_STALE_AFTER_S))

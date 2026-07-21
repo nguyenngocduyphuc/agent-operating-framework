@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Duyệt ExecPlan — AOF v0.4 auto-handoff</title>
+<style>
+ body{font-family:-apple-system,'Segoe UI',sans-serif;max-width:860px;margin:2rem auto;
+      padding:0 1rem;color:#1a1a2e;background:#fafafa;line-height:1.5}
+ h1{font-size:1.5rem;margin-bottom:.2rem} h2{font-size:1.15rem;margin-top:2rem;
+    border-bottom:2px solid #e2e2ea;padding-bottom:.3rem}
+ h3{font-size:1rem;margin:1.1rem 0 .3rem}
+ .meta{color:#666;font-size:.88rem;margin-bottom:1rem}
+ .blocker{background:#fff4f2;border:1px solid #e8a99c;border-left:5px solid #c0392b;
+          border-radius:8px;padding:.9rem 1.1rem;margin:1rem 0;font-size:.92rem}
+ .blocker b{color:#c0392b}
+ .contract{background:#fff;border:1px solid #e2e2ea;border-radius:10px;padding:1rem 1.2rem;
+           font-size:.88rem}
+ .contract dt{font-weight:700;color:#444;margin-top:.55rem}
+ .contract dt:first-child{margin-top:0}
+ .contract dd{margin:.15rem 0 0;color:#333}
+ .cards{display:flex;gap:.7rem;flex-wrap:wrap;margin:1rem 0}
+ .card{background:#fff;border:1px solid #e2e2ea;border-radius:10px;padding:.9rem 1.1rem;
+       flex:1 1 240px;min-width:240px}
+ .card h3{margin:0 0 .4rem;font-size:1rem}
+ .tag{display:inline-block;font-size:.72rem;font-weight:700;padding:.12rem .5rem;
+      border-radius:999px;margin-left:.4rem;vertical-align:middle}
+ .tag.core{background:#eef0ff;color:#3949ab}
+ .tag.small{background:#e8f7ee;color:#1e7e42}
+ .card ul{margin:.4rem 0 0;padding-left:1.1rem;font-size:.86rem}
+ .card .accept{margin-top:.5rem;font-size:.82rem;color:#444;background:#f7f7fb;
+               border-radius:6px;padding:.5rem .6rem}
+ .card .accept b{color:#1a1a2e}
+ table{border-collapse:collapse;width:100%;background:#fff;font-size:.86rem;margin:.6rem 0 1.2rem}
+ th,td{border:1px solid #e2e2ea;padding:.45rem .6rem;text-align:left;vertical-align:top}
+ th{background:#f1f1f6}
+ code{background:#f1f1f6;padding:.05rem .35rem;border-radius:4px;font-size:.85em}
+ ol.order li{margin:.3rem 0}
+ .checkpoint{display:inline-block;background:#fff8e1;color:#8a6100;font-size:.72rem;
+             font-weight:700;padding:.1rem .5rem;border-radius:6px;margin-left:.4rem}
+ .stop{background:#fff;border:1px solid #e2e2ea;border-radius:8px;padding:.7rem 1rem;
+       font-size:.86rem}
+ .honest{margin-top:1.6rem;font-size:.82rem;color:#777;border-top:1px solid #e2e2ea;
+         padding-top:.6rem}
+ .go{margin-top:1.6rem;background:#fff;border:1px solid #e2e2ea;border-radius:10px;
+     padding:1rem 1.2rem;font-size:.9rem}
+</style></head><body>
+
+<h1>Duyệt ExecPlan — AOF v0.4: bàn giao tự động, không tái phạm lỗi, worker chính xác</h1>
+<p class="meta">Nguồn: <code>docs/plans/AOF_V04_AUTOHANDOFF_EXECPLAN_20260721.md</code> (commit f47a0e9) ·
+Bản duyệt sinh: 2026-07-21 · Nhánh: <code>feat/aof-v03-nocode-ops</code> · Trạng thái tree: sạch</p>
+
+<div class="blocker">
+<b>Blocker trước khi cite History Gate:</b> tài liệu tham chiếu
+<code>docs/sessions/HANDOFF_20260721_064104.md</code> mà ExecPlan liệt kê trong
+<code>references</code> <b>không tồn tại</b> trên đĩa — thư mục <code>docs/sessions/</code>
+chưa từng được tạo trong repo này. Đây là bằng chứng gốc nhất cho lý do F1/F2
+cần làm: handoff hiện tại không đảm bảo ghi đúng chỗ / ghi được. Đề xuất: chạy
+<code>session_handoff</code> NGAY sau khi duyệt plan này để có một handoff thật
+làm mốc "trước khi build", thay cho file bị thiếu.
+</div>
+
+<h2>Hợp đồng (7 dòng, nguyên văn từ ExecPlan)</h2>
+<dl class="contract">
+<dt>Scope</dt><dd><code>core/oplog.py</code>, <code>core/mcp_server.py</code>,
+<code>core/cli.py</code>, <code>core/preflight.py</code>, <code>core/lease.py</code>
+(đọc identity), <code>tests/</code>, <code>docs/</code>,
+<code>.github/workflows/</code> (mới), adapter NP_AI:
+<code>scripts/aof_resume.sh</code> + hook SessionStart (ngoài vendor)</dd>
+<dt>DoD</dt><dd>handoff/recap ghi vào repo đang làm + index tập trung
+<code>~/.aof/handoffs/index.jsonl</code>; <code>aof resume</code> in RESUME BRIEF
+không cần copy-paste; <code>session_handoff</code> tự kèm recap cùng timestamp;
+<code>errors.jsonl</code> + preflight cảnh báo tái phạm + lessons liệt kê lỗi
+thiếu <code>test_ref</code>; policy <code>worker_stale_after_s</code> + doc chuẩn
+worker; CI ruff+pytest 3.10-3.12 xanh; toàn bộ test cũ vẫn xanh</dd>
+<dt>Do not</dt><dd>sửa skill /aof đang sống khi chưa smoke; đổi semantics
+lanes/wave2 4-trạng-thái; đưa cmux vào core; push remote; hardcode số tool</dd>
+<dt>Stop if</dt><dd>bất kỳ test cũ nào đỏ không giải thích được; index ghi được
+nhưng resume đọc sai repo; thay đổi đòi đụng NP_AI scripts ngoài
+<code>aof_resume.sh</code> + hook</dd>
+<dt>Return</dt><dd>commit trên <code>feat/aof-v03-nocode-ops</code>, tests xanh
+kèm số, smoke 2 môi trường, handoff + recap của chính phiên đó sinh bằng tool mới</dd>
+</dl>
+
+<h2>Grounding kỹ thuật đã xác minh (đọc code thật trước khi lên plan này)</h2>
+<table>
+<tr><th>Điểm</th><th>Thực tế trong code hôm nay</th></tr>
+<tr><td>Handoff/recap ghi sai chỗ đa-repo</td>
+<td><code>mcp_server.py:787</code> — <code>ws = bound_workspace or AOF_WORKSPACE or
+os.getcwd()</code>, KHÔNG dùng <code>lease.repo_identity(cwd)</code>. Làm trong
+repo con vẫn ghi vào workspace gốc. F1 sửa đúng điểm này.</td></tr>
+<tr><td>Repo identity đã có sẵn</td>
+<td><code>core/lease.py::repo_identity(cwd)</code> đã trả
+<code>(identity_path, identity_hash)</code> qua <code>git rev-parse
+--git-common-dir</code> — F1 tái dùng, không viết lại.</td></tr>
+<tr><td>Số tool hiện tại</td>
+<td><code>core/mcp_server.py</code> TOOLS = 12 (dòng 49-104). F1 thêm
+<code>aof_resume</code> → 13, đúng ExecPlan.</td></tr>
+<tr><td>CLI đã có <code>recap</code>/<code>handoff</code></td>
+<td><code>core/cli.py</code> dùng <code>os.getcwd()</code> trực tiếp (khác
+nhánh MCP) — cần hợp nhất qua cùng hàm identity để CLI và MCP nhất quán.</td></tr>
+<tr><td>Policy pattern có sẵn để nhân bản</td>
+<td><code>DEFAULT_LITE_MAX_FILES</code>, <code>DEFAULT_RISK_GLOBS</code> +
+<code>_workspace_policy()</code> (mcp_server.py) và
+<code>DEFAULT_STALE_AFTER_S=300</code> (heartbeat.py) — F4 thêm
+<code>worker_stale_after_s</code> theo đúng khuôn này.</td></tr>
+<tr><td>Test hiện có liên quan</td>
+<td><code>tests/test_recap_handoff.py</code>, <code>test_lease.py</code>,
+<code>test_oplog_heartbeat.py</code>, <code>test_mcp_server.py</code>,
+<code>test_no_shadow_import.py</code> (15 file, chưa chạy pytest trong phiên
+này — sandbox không có <code>.venv</code>, cần chạy trên máy thật).</td></tr>
+</table>
+
+<h2>5 tính năng — acceptance criteria + file đụng tới</h2>
+<div class="cards">
+
+<div class="card">
+<h3>F2 — Handoff tự kèm recap<span class="tag small">nhỏ nhất</span>
+<span class="checkpoint">checkpoint 1</span></h3>
+<p>Sửa nhánh <code>session_handoff</code> trong <code>mcp_server.py</code>
+(và lệnh <code>aof handoff</code> trong <code>cli.py</code>) để mỗi lần gọi
+sinh cả recap HTML cùng stamp, link chéo ở đầu file md.</p>
+<div class="accept"><b>Acceptance:</b> gọi <code>session_handoff</code> một
+lần → 2 file <code>HANDOFF_&lt;stamp&gt;.md</code> +
+<code>RECAP_&lt;stamp&gt;.html</code> cùng stamp, md có dòng
+<code>Recap: ./RECAP_&lt;stamp&gt;.html</code>.</div>
+<p><b>File:</b> core/mcp_server.py, core/cli.py, core/oplog.py,
+tests/test_recap_handoff.py</p>
+</div>
+
+<div class="card">
+<h3>F1 — Đa-repo + index + <code>aof resume</code>
+<span class="tag core">lõi wave</span><span class="checkpoint">checkpoint 2</span></h3>
+<p>Ghi handoff/recap vào <code>repo_identity(bound_cwd)</code> thay vì
+AOF_WORKSPACE cố định; append dòng vào
+<code>~/.aof/handoffs/index.jsonl</code> mỗi lần ghi; tool MCP thứ 13 +
+lệnh CLI <code>aof resume</code> đọc index → in RESUME BRIEF.</p>
+<div class="accept"><b>Acceptance:</b> làm trong repo A → file nằm trong
+A/docs/sessions; index có dòng mới đúng schema; <code>aof resume --task X</code>
+trả đúng brief; test đa-repo (2 repo giả lập, không tráo lẫn).</div>
+<p><b>File:</b> core/lease.py (dùng lại), core/oplog.py (index writer),
+core/mcp_server.py (tool 13 + sửa dòng 787), core/cli.py (subparser resume),
+tests mới test_resume_multirepo.py</p>
+</div>
+
+<div class="card">
+<h3>F3 — Error ledger chống tái phạm</h3>
+<p><code>~/.aof/errors.jsonl</code> qua <code>session_log</code> event
+<code>error</code> (không thêm tool mới); preflight WARN khi có lỗi
+<code>status != closed</code> hoặc fingerprint lặp ≥2; đóng lỗi bắt buộc
+<code>test_ref</code>; lệnh <code>aof lessons</code>.</p>
+<div class="accept"><b>Acceptance:</b> seed 2 lỗi → preflight warn đúng;
+đóng lỗi thiếu <code>test_ref</code> bị từ chối; <code>aof lessons</code>
+liệt kê đúng lỗi mở + lỗi thiếu test_ref.</div>
+<p><b>File:</b> core/preflight.py, core/oplog.py hoặc core/errors.py (mới),
+core/cli.py (subparser lessons), tests mới test_error_ledger.py</p>
+</div>
+
+<div class="card">
+<h3>F4 — Chuẩn kiểm soát worker</h3>
+<p>4 luật đo được thành policy key <code>worker_stale_after_s</code> (mặc
+định 300, theo khuôn <code>DEFAULT_STALE_AFTER_S</code>) +
+<code>docs/WORKER_CONTROL_VI.md</code> 1 trang; <code>op_log --task</code>
+đã có sẵn, chỉ cần xác nhận hiển thị đủ verify fail rate.</p>
+<div class="accept"><b>Acceptance:</b> policy key mới có test; doc 1 trang
+tồn tại; <code>op_log --task</code> hiển thị đủ số liệu.</div>
+<p><b>File:</b> core/mcp_server.py (policy default), docs/WORKER_CONTROL_VI.md
+(mới), tests/test_policy_compat.py (mở rộng)</p>
+</div>
+
+<div class="card">
+<h3>F5 — CI<span class="tag small">chặn hồi quy</span></h3>
+<p><code>.github/workflows/ci.yml</code>: ruff + pytest, ma trận Python
+3.10/3.11/3.12, chạy trên push/PR. Không đụng release/publish.</p>
+<div class="accept"><b>Acceptance:</b> file YAML hợp lệ, chạy được cục bộ
+qua <code>act</code> nếu có, hoặc ít nhất lint YAML sạch.</div>
+<p><b>File:</b> .github/workflows/ci.yml (mới)</p>
+</div>
+
+</div>
+
+<h2>Thứ tự thực thi (nguyên văn ExecPlan, có checkpoint duyệt)</h2>
+<ol class="order">
+<li>History Gate: đã đọc HISTORY_GOVERNANCE.md + docs/history/INDEX.md trước khi viết plan này ✔</li>
+<li>F2 (nhỏ nhất, mở đường index) <span class="checkpoint">dừng xin duyệt sau F2</span></li>
+<li>F1 (đa-repo + index + resume — lõi wave) <span class="checkpoint">dừng xin duyệt sau F1</span></li>
+<li>F3 (error ledger, dùng index/oplog vừa chuẩn hoá)</li>
+<li>F4 (worker doc + policy) + F5 (CI)</li>
+<li>Verify toàn bộ + smoke 2 môi trường + tự sinh handoff/recap bằng tool mới</li>
+</ol>
+
+<h2>Stop rules</h2>
+<div class="stop">
+Không nới lỏng bất kỳ gate nào để test dễ pass · Index/errors: một writer một
+schema — phát hiện writer thứ hai → dừng, hỏi CEO · Mọi lỗi mới phát hiện
+trong lúc build → ghi <code>errors.jsonl</code> NGAY, sửa kèm test · Bất kỳ
+test cũ nào đỏ không giải thích được → dừng.
+</div>
+
+<div class="go">
+<b>Cần CEO quyết trước khi core/mcp_server.py bị sửa:</b> chạy trọn 5 tính
+năng liên tục trong phiên Cowork này, hay dừng lại xin duyệt sau mỗi checkpoint
+(F2, F1, F3, F4+F5)? ExecPlan gốc ghi owner thực thi dự kiến là "phiên Claude
+Code mới" — Cowork hiện có cùng quyền file+bash trên repo canonical nên có thể
+làm, nhưng đây là thay đổi core infra nhiều file, nên hỏi rõ trước khi bắt đầu.
+</div>
+
+<p class="honest">Plan này chưng cất từ ExecPlan gốc + đọc trực tiếp
+core/lease.py, core/oplog.py, core/mcp_server.py, core/cli.py hôm nay — không
+suy đoán. Số liệu tool/dòng code có thể lệch nếu file đổi giữa lúc duyệt và
+lúc thực thi; verify_gate sẽ bắt lệch đó.</p>
+
+</body></html>

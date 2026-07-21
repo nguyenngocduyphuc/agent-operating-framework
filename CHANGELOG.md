@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Architecture & doc governance (production path):** `docs/ARCHITECTURE.md`,
+  `docs/ENGINEERING_WORKFLOW.md`, `docs/DOCUMENT_GOVERNANCE.md`; `CONTRIBUTING.md`
+  corrected for this repo (was a stale monorepo template). Entry map:
+  `docs/INDEX.md`.
+- **v0.4 F1/F2 handoff loop (in progress on branch):** `write_session_bundle`
+  (handoff+recap same stamp); write root via `nearest_repo()` (not
+  `repo_identity()` / not parent `AOF_WORKSPACE`); host index
+  `$AOF_AUDIT_DIR/handoffs/index.jsonl`; CLI `aof resume` + MCP tool
+  `aof_resume` (13th tool). Multirepo regression tests included.
+
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo
   shares ONE lease namespace. A second live session preflighting the same task is

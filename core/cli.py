@@ -57,6 +57,14 @@ def main() -> None:
     p_watch.add_argument("--lang", choices=["vi", "en"], default=None)
     p_watch.add_argument("--json", action="store_true", dest="as_json")
 
+    p_resume = sub.add_parser(
+        "resume",
+        help="Print RESUME BRIEF from the host handoff index (newest matching task/repo).",
+    )
+    p_resume.add_argument("--task", default=None)
+    p_resume.add_argument("--repo", default=None, help="working-tree path or repo_key")
+    p_resume.add_argument("--lang", choices=["vi", "en"], default=None)
+
     args = parser.parse_args()
 
     if args.command == "start-mcp-server":
@@ -83,29 +91,67 @@ def main() -> None:
         sys.exit(0)
     elif args.command in ("recap", "handoff"):
         import os
+        import subprocess
         import time as _time
         from datetime import datetime
 
+        from core.lease import repo_identity
         from core.oplog import (
+            append_handoff_index,
             build_digest,
             default_session_dir,
-            format_handoff,
             render_html,
+            write_session_bundle,
         )
+        from core.preflight import nearest_repo
+
         since = (_time.time() - args.since_hours * 3600) if args.since_hours else None
         report = build_digest(since_ts=since)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        cwd = os.getcwd()
+        repo_root = nearest_repo(cwd) or cwd
         if args.command == "recap":
             content = render_html(report, args.lang)
-            default_name = f"RECAP_{stamp}.html"
+            out = args.out or os.path.join(
+                default_session_dir(repo_root), f"RECAP_{stamp}.html")
+            os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+            with open(out, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            print(out)
         else:
-            content = format_handoff(report, args.lang)
-            default_name = f"HANDOFF_{stamp}.md"
-        out = args.out or os.path.join(default_session_dir(os.getcwd()), default_name)
-        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-        with open(out, "w", encoding="utf-8") as fh:
-            fh.write(content)
-        print(out)
+            # F2: handoff always carries its own recap, same stamp, cross-linked.
+            # F1-1: write next to nearest git root, not a random subdir cwd.
+            if args.out:
+                outdir = os.path.dirname(args.out) or "."
+            else:
+                outdir = default_session_dir(repo_root)
+            bundle = write_session_bundle(outdir, report, args.lang, stamp)
+            if args.out:
+                os.replace(bundle["handoff_path"], args.out)
+                bundle["handoff_path"] = args.out
+            try:
+                ident_path, ident_key = repo_identity(repo_root)
+            except Exception:
+                ident_path, ident_key = repo_root, ""
+            try:
+                br = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    cwd=repo_root, capture_output=True, text=True, timeout=10,
+                )
+                branch = br.stdout.strip() if br.returncode == 0 else ""
+            except (OSError, subprocess.TimeoutExpired):
+                branch = ""
+            summary = {
+                "sessions": report["sessions"], "done": report["done"],
+                "blocked": report["blocked"], "collisions": report["collisions"],
+            }
+            append_handoff_index(ident_path, ident_key, branch, None, bundle, summary)
+            print(bundle["handoff_path"])
+            print(bundle["recap_path"], file=sys.stderr)
+        sys.exit(0)
+    elif args.command == "resume":
+        from core.oplog import format_resume_brief
+        print(format_resume_brief(task=args.task, repo=args.repo, lang=args.lang))
         sys.exit(0)
     elif args.command == "watch":
         from core.heartbeat import DEFAULT_STALE_AFTER_S, check, format_check

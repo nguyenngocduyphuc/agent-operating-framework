@@ -95,6 +95,41 @@ def test_cli_recap_and_handoff_write_into_docs_sessions(aof_home, tmp_path):
         assert out.parent == ws / "docs" / "sessions", "docs must update under the workspace"
 
 
+def test_write_session_bundle_cross_links_handoff_and_recap(aof_home, tmp_path):
+    """F2: one call writes handoff .md + recap .html sharing one stamp."""
+    _seed()
+    from core.oplog import write_session_bundle
+    outdir = tmp_path / "docs" / "sessions"
+    bundle = write_session_bundle(
+        str(outdir), build_digest(since_ts=time.time() - 7200), lang="vi", stamp="20260721_999999",
+    )
+    assert bundle["handoff_path"].endswith("HANDOFF_20260721_999999.md")
+    assert bundle["recap_path"].endswith("RECAP_20260721_999999.html")
+    handoff = Path(bundle["handoff_path"]).read_text(encoding="utf-8")
+    recap = Path(bundle["recap_path"]).read_text(encoding="utf-8")
+    assert "Recap (HTML): ./RECAP_20260721_999999.html" in handoff
+    assert recap.startswith("<!DOCTYPE html>")
+
+
+def test_cli_handoff_writes_recap_sibling(aof_home, tmp_path):
+    """F2 via CLI: `aof handoff` prints the .md on stdout, its recap on stderr."""
+    _seed()
+    ws = tmp_path / "ws2"
+    ws.mkdir()
+    env = {"AOF_AUDIT_DIR": str(aof_home / "aofhome"), "PATH": "/usr/bin:/bin",
+           "PYTHONPATH": str(REPO)}
+    r = subprocess.run(
+        [sys.executable, "-m", "core.cli", "handoff", "--since-hours", "2"],
+        capture_output=True, text=True, cwd=ws, env=env, timeout=60,
+    )
+    assert r.returncode == 0, r.stderr
+    handoff_path = Path(r.stdout.strip())
+    recap_path = Path(r.stderr.strip())
+    assert handoff_path.exists() and handoff_path.suffix == ".md"
+    assert recap_path.exists() and recap_path.suffix == ".html"
+    assert recap_path.name in handoff_path.read_text(encoding="utf-8")
+
+
 def test_init_policy_enables_karpathy_by_default(tmp_path):
     from core.doctor import run_init
     run_init(str(tmp_path))

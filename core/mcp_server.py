@@ -36,6 +36,7 @@ from core.enforcement import (
     with_stall_warning,
     write_decision,
 )
+from core.host_context import capture_host_context
 from core.preflight import load_policy, nearest_repo, workspace_root
 
 # Gate timeout bounds. A caller may raise the per-command timeout for slow suites,
@@ -680,7 +681,7 @@ def _call(rid,p):
                                    "lease_info": lr})
                     r["lease"] = {"status": lr.get("status")}
                     _audit({"event": "lease", "task": task, "status": lr.get("status")})
-            # Estate telemetry: always record preflight outcome + bound identity.
+            # Estate telemetry: preflight outcome + AOF/cmux host identity.
             _audit({
                 "event": "preflight",
                 "status": r.get("status"),
@@ -688,9 +689,12 @@ def _call(rid,p):
                 "repo": r.get("repo"),
                 "branch": r.get("branch"),
                 "task": r.get("task") or a.get("task"),
-                "cwd": _state.get("bound_cwd") or a.get("cwd"),
                 "lane": r.get("lane") or _state.get("bound_lane"),
                 "exit_code": r.get("exit_code"),
+                **capture_host_context(
+                    cwd=_state.get("bound_cwd") or a.get("cwd") or r.get("cwd"),
+                    workspace=r.get("workspace"),
+                ),
             })
             return _tool_ok(rid,r)
         if n=="check_contract":
@@ -1016,7 +1020,12 @@ def _send(m):
     sys.stdout.flush()
 
 def main():
-    _ensure_audit(); _audit({"event":"session_start","session_id":SESSION_ID})
+    _ensure_audit()
+    _audit({
+        "event": "session_start",
+        "session_id": SESSION_ID,
+        **capture_host_context(),
+    })
     for raw in sys.stdin:
         raw=raw.strip()
         if not raw:

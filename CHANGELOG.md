@@ -31,6 +31,9 @@
   `require_karpathy: true` (was missing → silent OFF). Docs: `BYPASS_AND_KARPATHY.md`,
   `DOGFOOD_7DAY_VI.md`. Estate KPIs add productive vs noise sessions + untagged task
   activity. `scripts/estate_weekly.sh` for weekly HTML (+ optional cmux open).
+- **Workspace/cmux identity on audit:** `session_start` + `preflight` capture
+  `CMUX_WORKSPACE_ID` / surface / AOF_WORKSPACE / cwd. `estate-report` groups
+  **per workspace** so multi-cmux effectiveness is measurable from this deploy on.
 
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo

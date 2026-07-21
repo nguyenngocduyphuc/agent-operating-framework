@@ -18,6 +18,7 @@ from typing import Any
 
 from core.enforcement import audit_dir, audit_file, decision_file, ensure_audit_dir
 from core.errors_ledger import fingerprint_counts, latest_by_fingerprint, load_errors
+from core.host_context import workspace_key
 from core.oplog import _load_jsonl, load_handoff_index
 
 
@@ -81,18 +82,70 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
     }
     noise_sessions = sessions - productive_sessions
 
+    # Map session -> workspace key (last non-unknown wins; prefer cmux id).
+    session_ws: dict[str, str] = {}
+    for e in audit:
+        sid = e.get("_session")
+        if not sid:
+            continue
+        key = workspace_key(e)
+        if key != "(unknown)" or str(sid) not in session_ws:
+            session_ws[str(sid)] = key
+
+    per_ws: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "sessions": set(),
+            "productive": set(),
+            "noise": set(),
+            "preflight_clear": 0,
+            "preflight_warn": 0,
+            "preflight_blocked": 0,
+            "handoffs": 0,
+            "resumes": 0,
+            "lease_collisions": 0,
+            "cmux_surface_ids": set(),
+            "repos": set(),
+        }
+    )
+    for sid, key in session_ws.items():
+        b = per_ws[key]
+        b["sessions"].add(sid)
+        if sid in productive_sessions:
+            b["productive"].add(sid)
+        if sid in noise_sessions:
+            b["noise"].add(sid)
+
     event_counts = Counter(e.get("event") for e in audit if e.get("event"))
     preflight_status = Counter()
     workspaces: set[str] = set()
     repos_seen: set[str] = set()
     for e in audit:
+        wkey = workspace_key(e)
+        if wkey != "(unknown)":
+            workspaces.add(wkey)
+        wb = per_ws[wkey]
+        if e.get("cmux_surface_id"):
+            wb["cmux_surface_ids"].add(str(e["cmux_surface_id"]))
         if e.get("event") == "preflight":
             st = e.get("status") or "unknown"
             preflight_status[str(st)] += 1
+            if st == "clear":
+                wb["preflight_clear"] += 1
+            elif st == "warn":
+                wb["preflight_warn"] += 1
+            elif st == "blocked":
+                wb["preflight_blocked"] += 1
             if e.get("workspace"):
                 workspaces.add(str(e["workspace"]))
             if e.get("repo"):
                 repos_seen.add(str(e["repo"]))
+                wb["repos"].add(str(e["repo"]))
+        if e.get("event") == "session_handoff":
+            wb["handoffs"] += 1
+        if e.get("event") == "aof_resume":
+            wb["resumes"] += 1
+        if e.get("event") == "lease_conflict":
+            wb["lease_collisions"] += 1
         if e.get("event") in ("session_handoff", "session_recap") and e.get("path"):
             repos_seen.add(_repo_label_from_path(str(e["path"])))
 
@@ -198,6 +251,32 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
             "label": v.get("label") or k,
         }
 
+    per_workspace_out: dict[str, dict[str, Any]] = {}
+    for k, v in per_ws.items():
+        n_sess = len(v["sessions"])
+        if n_sess == 0 and not any(
+            v[x] for x in ("preflight_clear", "preflight_warn", "preflight_blocked",
+                           "handoffs", "resumes", "lease_collisions")
+        ):
+            continue
+        per_workspace_out[k] = {
+            "sessions": n_sess,
+            "productive": len(v["productive"]),
+            "noise": len(v["noise"]),
+            "noise_rate": _safe_rate(len(v["noise"]), n_sess),
+            "preflight_clear": v["preflight_clear"],
+            "preflight_warn": v["preflight_warn"],
+            "preflight_blocked": v["preflight_blocked"],
+            "handoffs": v["handoffs"],
+            "resumes": v["resumes"],
+            "lease_collisions": v["lease_collisions"],
+            "cmux_surface_ids": sorted(v["cmux_surface_ids"])[:20],
+            "repos": sorted(v["repos"])[:20],
+            "uses_cmux": bool(v["cmux_surface_ids"]) or (
+                len(k) >= 32 and k.count("-") >= 4
+            ),
+        }
+
     verify_n = verify_pass + verify_fail
     contract_n = contract_ok + contract_fail
     close_n = done + blocked
@@ -208,7 +287,8 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
         "sessions_productive": len(productive_sessions),
         "sessions_noise": len(noise_sessions),
         "noise_session_rate": _safe_rate(len(noise_sessions), len(sessions) or 0),
-        "workspaces_seen": len(workspaces),
+        "workspaces_seen": len(per_workspace_out) or len(workspaces),
+        "cmux_workspaces_seen": sum(1 for w in per_workspace_out.values() if w.get("uses_cmux")),
         "repos_seen": len(repos_seen) or len(per_repo_out),
         "preflight_total": preflight_n,
         "preflight_clear": preflight_status.get("clear", 0),
@@ -267,6 +347,7 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
         "preflight_status": dict(preflight_status),
         "event_counts": dict(event_counts),
         "workspaces": sorted(workspaces),
+        "per_workspace": per_workspace_out,
         "per_repo": per_repo_out,
         "top_tasks": top_tasks,
         "repeated_fingerprints": repeated_fps,
@@ -309,7 +390,8 @@ def format_estate_report(report: dict[str, Any], lang: str | None = None) -> str
             f"- Phiên: {k.get('sessions')} "
             f"(productive={k.get('sessions_productive')} noise={k.get('sessions_noise')} "
             f"noise_rate={k.get('noise_session_rate')})",
-            f"- Workspace thấy trong preflight: {k.get('workspaces_seen')} · repo: {k.get('repos_seen')}",
+            f"- Workspace: {k.get('workspaces_seen')} "
+            f"(cmux={k.get('cmux_workspaces_seen')}) · repo: {k.get('repos_seen')}",
             f"- Karpathy contract blocks: {k.get('karpathy_contract_blocks')} · "
             f"activity không gắn task: {k.get('untagged_task_activity')}",
             f"- Preflight clear/warn/blocked: "
@@ -335,7 +417,8 @@ def format_estate_report(report: dict[str, Any], lang: str | None = None) -> str
             f"- sessions: {k.get('sessions')} "
             f"(productive={k.get('sessions_productive')} noise={k.get('sessions_noise')} "
             f"noise_rate={k.get('noise_session_rate')})",
-            f"- workspaces (preflight): {k.get('workspaces_seen')} · repos: {k.get('repos_seen')}",
+            f"- workspaces: {k.get('workspaces_seen')} "
+            f"(cmux={k.get('cmux_workspaces_seen')}) · repos: {k.get('repos_seen')}",
             f"- karpathy_contract_blocks: {k.get('karpathy_contract_blocks')} · "
             f"untagged_task_activity: {k.get('untagged_task_activity')}",
             f"- preflight clear/warn/blocked: "
@@ -364,6 +447,27 @@ def format_estate_report(report: dict[str, Any], lang: str | None = None) -> str
                 f"- {label}: handoffs={info.get('handoffs')} "
                 f"tasks={len(info.get('tasks') or [])} "
                 f"branches={','.join(info.get('branches') or []) or '—'}"
+            )
+
+    lines.append("")
+    lines.append("## Theo workspace (AOF path / cmux id)" if vi else "## Per workspace (AOF path / cmux id)")
+    pws = report.get("per_workspace") or {}
+    if not pws:
+        lines.append("(none)" if not vi else "(không — cần traffic sau khi bật host identity)")
+    else:
+        ranked = sorted(
+            pws.items(),
+            key=lambda kv: (-kv[1].get("productive", 0), -kv[1].get("sessions", 0)),
+        )[:15]
+        for wkey, info in ranked:
+            label = wkey if len(wkey) < 64 else wkey[:28] + "…" + wkey[-12:]
+            cmux = "cmux" if info.get("uses_cmux") else "path"
+            lines.append(
+                f"- [{cmux}] {label}: sess={info.get('sessions')} "
+                f"prod/noise={info.get('productive')}/{info.get('noise')} "
+                f"pf={info.get('preflight_clear')}/{info.get('preflight_warn')}/{info.get('preflight_blocked')} "
+                f"handoff/resume={info.get('handoffs')}/{info.get('resumes')} "
+                f"lease_col={info.get('lease_collisions')}"
             )
 
     lines.append("")

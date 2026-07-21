@@ -17,6 +17,11 @@
   at most one policy change and never writes `.aof_policy.json`.
 - **v0.4 F4 worker control:** `docs/WORKER_CONTROL_VI.md`; policy
   `worker_stale_after_s` (default 300) for `worker_watch` / `aof watch`.
+- **CI tightened:** `.github/workflows/aof.yml` runs full `ruff check core/ tests/`,
+  pytest matrix 3.10–3.12, and live `tools/list` count vs `TOOLS`.
+- **Effectiveness smoke:** `scripts/effectiveness_ab_smoke.py` +
+  `docs/EFFECTIVENESS_SMOKE_20260721.md` (WITH vs WITHOUT AOF on 3 failure modes;
+  not a statistical bench).
 
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo

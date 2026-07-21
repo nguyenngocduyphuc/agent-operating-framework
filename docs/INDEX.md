@@ -34,6 +34,7 @@ docs/
   REWIRE_MAP_AOF_SKILL.md     strangler /aof → core
   PLAN_REVIEW_STANDARD.md     chuẩn review plan
   ASSESSMENT_*.md             thẩm định có bằng chứng
+  EFFECTIVENESS_SMOKE_*.md    smoke WITH vs WITHOUT AOF (không phải bench n≥30)
   history/INDEX.md            dòng thời gian (chưng cất)
   decisions/                  decision records
   plans/                      ExecPlan + context (working; có thể STALE)

@@ -22,6 +22,11 @@
 - **Effectiveness smoke:** `scripts/effectiveness_ab_smoke.py` +
   `docs/EFFECTIVENESS_SMOKE_20260721.md` (WITH vs WITHOUT AOF on 3 failure modes;
   not a statistical bench).
+- **Estate effectiveness:** `aof estate-report` aggregates host ledgers into KPIs
+  (sessions, preflight rates, lease collisions, verify fail rate, handoff/resume,
+  open errors, per-repo). Snapshots under `~/.aof/estate/`. Preflight MCP now
+  audits workspace/repo/status for multi-workspace visibility.
+  See `docs/ESTATE_EFFECTIVENESS.md`.
 
 - **Task lease (`core/lease.py`)**: one task, one live writer session. Repository
   identity is `git rev-parse --git-common-dir`, so every linked worktree of a repo

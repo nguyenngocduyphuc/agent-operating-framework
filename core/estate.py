@@ -64,6 +64,23 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
     sessions = {e.get("_session") for e in audit if e.get("_session")}
     sessions.discard(None)
 
+    # Noise filter: sessions that only start/end (or probe) are test/MCP spam,
+    # not operational work. Productive = any enforcement or report event.
+    _PRODUCTIVE = frozenset({
+        "preflight", "check_contract", "verify_gate", "audit_scope",
+        "post_evidence", "session_handoff", "session_recap", "aof_resume",
+        "lease", "lease_conflict", "error", "needs_approval",
+    })
+    events_by_session: dict[str, set[str]] = defaultdict(set)
+    for e in audit:
+        sid = e.get("_session")
+        if sid and e.get("event"):
+            events_by_session[str(sid)].add(str(e["event"]))
+    productive_sessions = {
+        sid for sid, evs in events_by_session.items() if evs & _PRODUCTIVE
+    }
+    noise_sessions = sessions - productive_sessions
+
     event_counts = Counter(e.get("event") for e in audit if e.get("event"))
     preflight_status = Counter()
     workspaces: set[str] = set()
@@ -82,6 +99,14 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
     collisions = event_counts.get("lease_conflict", 0)
     resumes = event_counts.get("aof_resume", 0)
     handoff_events = event_counts.get("session_handoff", 0)
+    # Karpathy enforcement signal: contract failures that mention karpathy in audit
+    # are not always tagged; use decision field when present.
+    karpathy_blocks = sum(
+        1 for d in decisions
+        if d.get("decision") == "check_contract"
+        and d.get("ok") is False
+        and (d.get("karpathy_ok") is False or "karpathy" in str(d.get("hint") or "").lower())
+    )
 
     verify_pass = verify_fail = 0
     contract_ok = contract_fail = 0
@@ -180,6 +205,9 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
 
     kpis = {
         "sessions": len(sessions),
+        "sessions_productive": len(productive_sessions),
+        "sessions_noise": len(noise_sessions),
+        "noise_session_rate": _safe_rate(len(noise_sessions), len(sessions) or 0),
         "workspaces_seen": len(workspaces),
         "repos_seen": len(repos_seen) or len(per_repo_out),
         "preflight_total": preflight_n,
@@ -199,6 +227,13 @@ def build_estate_report(window_hours: float = 168) -> dict[str, Any]:
         "contract_ok": contract_ok,
         "contract_fail": contract_fail,
         "contract_fail_rate": _safe_rate(contract_fail, contract_n),
+        "karpathy_contract_blocks": karpathy_blocks,
+        "untagged_task_activity": (
+            per_task.get("(none)", {}).get("verify_pass", 0)
+            + per_task.get("(none)", {}).get("verify_fail", 0)
+            + per_task.get("(none)", {}).get("contract_ok", 0)
+            + per_task.get("(none)", {}).get("contract_fail", 0)
+        ),
         "done": done,
         "blocked": blocked,
         "blocked_share": _safe_rate(blocked, close_n),
@@ -271,8 +306,12 @@ def format_estate_report(report: dict[str, Any], lang: str | None = None) -> str
             f"Cửa sổ: {report.get('window_hours')}h · audit: {report.get('audit_dir')}",
             "",
             "## KPI chính",
-            f"- Phiên (sessions): {k.get('sessions')}",
+            f"- Phiên: {k.get('sessions')} "
+            f"(productive={k.get('sessions_productive')} noise={k.get('sessions_noise')} "
+            f"noise_rate={k.get('noise_session_rate')})",
             f"- Workspace thấy trong preflight: {k.get('workspaces_seen')} · repo: {k.get('repos_seen')}",
+            f"- Karpathy contract blocks: {k.get('karpathy_contract_blocks')} · "
+            f"activity không gắn task: {k.get('untagged_task_activity')}",
             f"- Preflight clear/warn/blocked: "
             f"{k.get('preflight_clear')}/{k.get('preflight_warn')}/{k.get('preflight_blocked')} "
             f"(clear_rate={k.get('preflight_clear_rate')})",
@@ -293,8 +332,12 @@ def format_estate_report(report: dict[str, Any], lang: str | None = None) -> str
             f"Window: {report.get('window_hours')}h · audit: {report.get('audit_dir')}",
             "",
             "## Core KPIs",
-            f"- sessions: {k.get('sessions')}",
+            f"- sessions: {k.get('sessions')} "
+            f"(productive={k.get('sessions_productive')} noise={k.get('sessions_noise')} "
+            f"noise_rate={k.get('noise_session_rate')})",
             f"- workspaces (preflight): {k.get('workspaces_seen')} · repos: {k.get('repos_seen')}",
+            f"- karpathy_contract_blocks: {k.get('karpathy_contract_blocks')} · "
+            f"untagged_task_activity: {k.get('untagged_task_activity')}",
             f"- preflight clear/warn/blocked: "
             f"{k.get('preflight_clear')}/{k.get('preflight_warn')}/{k.get('preflight_blocked')} "
             f"(clear_rate={k.get('preflight_clear_rate')})",

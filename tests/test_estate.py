@@ -83,6 +83,8 @@ def test_build_estate_kpis(aof_home):
     assert k["repeated_fingerprints"] >= 1
     assert k["preflight_clear"] == 1
     assert k["preflight_blocked"] == 1
+    assert k["sessions_productive"] >= 1
+    assert "sessions_noise" in k
     assert "/ws/A" in r["workspaces"] or "repoA" in str(r)
     assert r["per_repo"]
     text = format_estate_report(r, "en")

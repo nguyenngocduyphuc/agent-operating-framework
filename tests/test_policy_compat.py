@@ -74,3 +74,19 @@ def test_worker_stale_after_s_default_and_override(tmp_path):
     _write(tmp_path, {"worker_stale_after_s": 120})
     p1 = load_policy(str(tmp_path))
     assert p1["worker_stale_after_s"] == 120
+
+
+def test_require_karpathy_default_on_without_policy_file(tmp_path):
+    """Product claim: Karpathy ON by default — missing key must not fail open."""
+    p = load_policy(str(tmp_path / "no-such-ws"))
+    assert p.get("require_karpathy") is True
+    # empty dir still no file
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert load_policy(str(empty)).get("require_karpathy") is True
+
+
+def test_setup_template_includes_karpathy():
+    """setup.sh must not reintroduce a policy template without require_karpathy."""
+    text = (REPO / "setup.sh").read_text(encoding="utf-8")
+    assert '"require_karpathy": true' in text

@@ -36,6 +36,8 @@ docs/
   ASSESSMENT_*.md             thẩm định có bằng chứng
   EFFECTIVENESS_SMOKE_*.md    smoke WITH vs WITHOUT AOF (không phải bench n≥30)
   ESTATE_EFFECTIVENESS.md     estate KPI + `aof estate-report` (nhiều repo/host ledger)
+  DOGFOOD_7DAY_VI.md          protocol 7 ngày + bypass thật
+  BYPASS_AND_KARPATHY.md      Karpathy default + bản đồ bypass
   history/INDEX.md            dòng thời gian (chưng cất)
   decisions/                  decision records
   plans/                      ExecPlan + context (working; có thể STALE)

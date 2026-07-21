@@ -40,9 +40,16 @@ TITLE="AOF Effectiveness Tracker"
 # Ensure label (ignore errors)
 gh label create "$LABEL" --repo "$REPO" --color "0E8A16" --description "Operational effectiveness metrics" 2>/dev/null || true
 
-# Find or create tracking issue
-NUM="$(gh issue list --repo "$REPO" --label "$LABEL" --state open --limit 20 \
-  --json number,title --jq ".[] | select(.title|test(\"Effectiveness Tracker\"; \"i\")) | .number" | head -1)"
+# Find or create tracking issue (compatible with older gh without create --json)
+NUM="$(gh issue list --repo "$REPO" --label "$LABEL" --state open --limit 30 \
+  --json number,title 2>/dev/null \
+  --jq ".[] | select(.title|test(\"Effectiveness Tracker\"; \"i\")) | .number" | head -1)"
+
+if [ -z "${NUM:-}" ]; then
+  # fallback: search title without label filter
+  NUM="$(gh issue list --repo "$REPO" --state open --limit 50 --search "Effectiveness Tracker in:title" \
+    --json number,title 2>/dev/null --jq '.[0].number' | head -1)"
+fi
 
 if [ -z "${NUM:-}" ]; then
   BODY_FILE="$(mktemp)"
@@ -67,11 +74,17 @@ This issue is the **GitHub cockpit** for operational effectiveness (not CI build
 
 See `docs/MASTER_PLAN.md` and `docs/metrics/README.md`.
 EOF
-  NUM="$(gh issue create --repo "$REPO" --title "$TITLE" --label "$LABEL" --body-file "$BODY_FILE" --json number -q .number)"
+  CREATED_URL="$(gh issue create --repo "$REPO" --title "$TITLE" --label "$LABEL" --body-file "$BODY_FILE")"
   rm -f "$BODY_FILE"
-  echo "Created tracking issue #$NUM"
+  NUM="$(printf '%s' "$CREATED_URL" | grep -oE '[0-9]+$')"
+  echo "Created tracking issue #$NUM ($CREATED_URL)"
 else
   echo "Using tracking issue #$NUM"
+fi
+
+if [ -z "${NUM:-}" ]; then
+  echo "Could not create or find tracking issue."
+  exit 3
 fi
 
 # Generate reports
